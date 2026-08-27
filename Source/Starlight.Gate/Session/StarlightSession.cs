@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Threading.Channels;
 using Google.Protobuf;
 using Serilog;
@@ -39,6 +39,12 @@ public sealed class StarlightSession : INetworkSession
     private readonly Lock _sendLock = new();
 
     private byte[] _xorPad;
+
+    /// The pad the client moves to once it has processed GetPlayerTokenRsp. Staged rather than
+    /// applied, because until that lands the client is still both encrypting and decrypting
+    /// with the old one, and a reply under the new pad is unreadable to it.
+    private byte[]? _pendingPad;
+
     private uint _sequenceId = 10;
     private ProtocolRegistry? _registry;
 
@@ -60,14 +66,12 @@ public sealed class StarlightSession : INetworkSession
     public RpcTunnel? GameTunnel { get; private set; }
     public CancellationToken Closing => _closing.Token;
 
-    public byte[] XorPad
+    /// <inheritdoc/>
+    public void Rekey(byte[] pad)
     {
-        set
+        lock (_sendLock)
         {
-            lock (_sendLock)
-            {
-                _xorPad = value;
-            }
+            _pendingPad = pad;
         }
     }
 
@@ -130,6 +134,29 @@ public sealed class StarlightSession : INetworkSession
         #region Pre-process the packet
 
         CryptoHelper.Xor(data, _xorPad);
+
+        // A packet the current pad can't make sense of is how the client tells us it finished
+        // the login handshake; everything after it, replies included, rides the staged pad.
+        if (_pendingPad is {} pending && !GamePacket.HasValidHeader(data))
+        {
+            CryptoHelper.Xor(data, _xorPad); // back to the raw bytes; XOR is its own inverse
+            CryptoHelper.Xor(data, pending);
+
+            if (GamePacket.HasValidHeader(data))
+            {
+                lock (_sendLock)
+                {
+                    _xorPad = pending;
+                    _pendingPad = null;
+                }
+            } else
+            {
+                // Neither pad fits, so this is corruption rather than the rekey. Undo the
+                // guess so the parse below reports what the live pad actually produced.
+                CryptoHelper.Xor(data, pending);
+                CryptoHelper.Xor(data, _xorPad);
+            }
+        }
 
         var packet = new GamePacket(data);
 

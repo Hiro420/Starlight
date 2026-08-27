@@ -149,7 +149,7 @@ public enum ProviderType
 public sealed class DatabaseConfig
 {
     public ProviderType Provider { get; set; } = ProviderType.Sqlite;
-    public StarlightDatabaseOptions Sqlite { get; set; } = new();
+    public StarlightDatabaseOptions Sqlite { get; set; } = new() { Path = "./data/accounts.db" };
 }
 
 /// <summary>

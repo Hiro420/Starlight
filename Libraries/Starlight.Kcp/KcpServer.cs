@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -28,15 +28,30 @@ public sealed class KcpServer : IDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, ct);
 
+        var receive = ReceiveLoopAsync(linked.Token);
+        var update = UpdateLoopAsync(linked.Token);
+
         try
         {
-            await Task.WhenAll(
-                ReceiveLoopAsync(linked.Token),
-                UpdateLoopAsync(linked.Token));
+            await await Task.WhenAny(receive, update);
         }
         catch (OperationCanceledException)
         {
             // Cancellation is the normal shutdown path.
+        }
+        finally
+        {
+            await linked.CancelAsync();
+
+            // Let the surviving loop observe the cancellation before its token source goes away.
+            try
+            {
+                await Task.WhenAll(receive, update);
+            }
+            catch
+            {
+                // Whatever took the server down already came out of the await above.
+            }
         }
     }
 

@@ -27,7 +27,14 @@ public sealed class DbGateService(
         using (var scope = scopes.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<StarlightDbContext>();
-            await db.Database.EnsureCreatedAsync(cancellationToken);
+
+            if (!await db.Database.EnsureCreatedAsync(cancellationToken) && await HasDriftedAsync(db, cancellationToken))
+            {
+                logger.LogWarning("The database schema no longer matches the data models; rebuilding it from scratch.");
+
+                await db.Database.EnsureDeletedAsync(cancellationToken);
+                await db.Database.EnsureCreatedAsync(cancellationToken);
+            }
         }
 #endif
 
@@ -43,6 +50,63 @@ public sealed class DbGateService(
         }
         return Task.CompletedTask;
     }
+
+#if DEBUG
+    /// <summary>
+    /// Compares every mapped table against the columns SQLite actually has.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RelationalDatabaseFacadeExtensions"/>' <c>EnsureCreated</c> does nothing once the
+    /// file has tables, so a database written by an older model keeps its old columns and every
+    /// insert dies on a <c>NOT NULL</c> the current model never fills in.
+    /// </remarks>
+    private static async Task<bool> HasDriftedAsync(StarlightDbContext db, CancellationToken cancellationToken)
+    {
+        // Owned types share their owner's table, so the expected columns are grouped, not per-entity.
+        var tables = db.Model.GetEntityTypes()
+            .Where(entity => entity.GetTableName() is not null)
+            .GroupBy(entity => entity.GetTableName()!)
+            .ToDictionary(
+                group => group.Key,
+                group => group.SelectMany(entity => entity.GetProperties())
+                    .Select(property => property.GetColumnName())
+                    .ToHashSet());
+
+        await db.Database.OpenConnectionAsync(cancellationToken);
+
+        try
+        {
+            foreach (var (table, expected) in tables)
+            {
+                await using var command = db.Database.GetDbConnection().CreateCommand();
+                command.CommandText = "SELECT name FROM pragma_table_info($table);";
+
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = "$table";
+                parameter.Value = table;
+                command.Parameters.Add(parameter);
+
+                var actual = new HashSet<string>();
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    actual.Add(reader.GetString(0));
+                }
+
+                // A missing table counts too; EnsureCreated won't add one to a populated file.
+                if (!actual.SetEquals(expected))
+                    return true;
+            }
+        }
+        finally
+        {
+            await db.Database.CloseConnectionAsync();
+        }
+
+        return false;
+    }
+#endif
 }
 
 public static class ServiceExtensions

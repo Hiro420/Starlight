@@ -1,4 +1,4 @@
-syntax = "proto3";
+﻿syntax = "proto3";
 
 package starlight.player;
 
@@ -54,4 +54,8 @@ message PlayerConnectNotify {
   uint32 uid = 1;
   string remote_addr = 2;
   uint32 remote_port = 3;
+
+  // The gate resolved `uid` from this. The game has to load the player by the same
+  // key, or the two ends disagree about who the client is.
+  string account_uid = 4;
 }

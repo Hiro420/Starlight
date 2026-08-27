@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -34,8 +34,9 @@ public sealed class GateServerService(
     private readonly ConcurrentDictionary<KcpConnection, INetworkSession> _sessions = new();
 
     public GateConfig Config => _config.Value;
+    public RpcTransport Rpc => rpc;
+    public ClientCrypto ClientCrypto => crypto;
     public TunnelClient Tunnel { get; } = new(rpc, connector);
-    public ClientCrypto ClientCrypto { get; } = crypto;
 
     public ProtocolRegistryProvider Registry { get; } = registryProvider;
     public byte[] ServerKey { get; private set; } = [];
@@ -78,7 +79,7 @@ public sealed class GateServerService(
                     }
                 };
 
-                await rpc.Publish(GateSubjects.ServerHeartbeat, new GateHeartbeatNotify {
+                await Rpc.Publish(GateSubjects.ServerHeartbeat, new GateHeartbeatNotify {
                     ServerInfo = serverInfo, RegionId = Config.RegionId
                 });
             }

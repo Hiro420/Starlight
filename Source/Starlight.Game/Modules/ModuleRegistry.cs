@@ -1,11 +1,15 @@
 using System.Collections.Frozen;
 using Starlight.Game.Player;
+using Starlight.Protocol;
 using IMessage = Starlight.Protobuf.Core.IMessage;
 
 namespace Starlight.Game.Modules;
 
 /// <summary>Invokes a single module's handler for a message, sending any reply through the player.</summary>
 public delegate ValueTask ModuleHandler(IModule module, IPlayer player, IMessage message);
+
+/// <summary>Invokes a single module's handler for a <see cref="LifecycleEvent"/>, which carries no message.</summary>
+public delegate ValueTask LifecycleHandler(IModule module, IPlayer player);
 
 /// <summary>
 /// Central, version-agnostic table mapping module types to a dense index and message types to the
@@ -18,10 +22,14 @@ public sealed class ModuleRegistry
     private readonly List<Func<IServiceProvider, IPlayer, IModule>> _factories = [];
     private readonly Dictionary<Type, int> _moduleIndex = [];
     private readonly Dictionary<Type, List<PendingHandler>> _handlers = [];
+    private readonly Dictionary<LifecycleEvent, List<PendingLifecycle>> _lifecycles = [];
 
     private Func<IServiceProvider, IPlayer, IModule>[] _compiledFactories = [];
     private FrozenDictionary<Type, int> _compiledIndex = FrozenDictionary<Type, int>.Empty;
     private FrozenDictionary<Type, CompiledHandler[]> _table = FrozenDictionary<Type, CompiledHandler[]>.Empty;
+
+    private FrozenDictionary<LifecycleEvent, CompiledLifecycle[]> _lifecycleTable =
+        FrozenDictionary<LifecycleEvent, CompiledLifecycle[]>.Empty;
 
     public bool Immutable { get; private set; }
 
@@ -38,7 +46,7 @@ public sealed class ModuleRegistry
     }
 
     /// <summary>Registers a handler for <typeparamref name="TMessage"/> living on <typeparamref name="TModule"/>.</summary>
-    public void AddHandler<TModule, TMessage>(int priority, ModuleHandler handler)
+    public void AddHandler<TModule, TMessage>(ModuleHandler handler)
         where TModule : class, IModule
         where TMessage : class, IMessage
     {
@@ -47,7 +55,19 @@ public sealed class ModuleRegistry
         if (!_handlers.TryGetValue(typeof(TMessage), out var list))
             _handlers[typeof(TMessage)] = list = [];
 
-        list.Add(new PendingHandler(typeof(TModule), priority, handler));
+        list.Add(new PendingHandler(typeof(TModule), handler));
+    }
+
+    /// <summary>Registers a handler for <paramref name="event"/> living on <typeparamref name="TModule"/>.</summary>
+    public void AddLifecycle<TModule>(LifecycleEvent @event, LifecycleHandler handler)
+        where TModule : class, IModule
+    {
+        ThrowIfImmutable();
+
+        if (!_lifecycles.TryGetValue(@event, out var list))
+            _lifecycles[@event] = list = [];
+
+        list.Add(new PendingLifecycle(typeof(TModule), handler));
     }
 
     /// <summary>Freezes the registry into its read-only lookup form, returning it. Call once, after all components register.</summary>
@@ -58,19 +78,23 @@ public sealed class ModuleRegistry
 
         _table = _handlers.ToFrozenDictionary(
             pair => pair.Key,
-            pair => pair.Value
-                .OrderByDescending(h => h.Priority)
-                .Select(h => new CompiledHandler(
-                    _moduleIndex.TryGetValue(h.ModuleType, out var index) ?
-                        index :
-                        throw new InvalidOperationException(
-                            $"A handler is registered for '{h.ModuleType.Name}', but that module was never added."),
-                    h.Handler))
-                .ToArray());
+            pair => pair.Value.Select(h => new CompiledHandler(Resolve(h.ModuleType), h.Handler)).ToArray());
+
+        _lifecycleTable = _lifecycles.ToFrozenDictionary(
+            pair => pair.Key,
+            pair => pair.Value.Select(h => new CompiledLifecycle(Resolve(h.ModuleType), h.Handler)).ToArray());
 
         Immutable = true;
 
         return this;
+
+        int Resolve(Type module)
+        {
+            return _moduleIndex.TryGetValue(module, out var index) ?
+                index :
+                throw new InvalidOperationException(
+                    $"A handler is registered for '{module.Name}', but that module was never added.");
+        }
     }
 
     private void ThrowIfImmutable()
@@ -98,7 +122,7 @@ public sealed class ModuleRegistry
     /// <summary>The dense index of <typeparamref name="TModule"/>, for resolving an instance from a player's array.</summary>
     public int IndexOf<TModule>() where TModule : class, IModule => _compiledIndex[typeof(TModule)];
 
-    /// <summary>Runs every handler registered for the runtime type of <paramref name="message"/>, in priority order.</summary>
+    /// <summary>Runs every handler registered for the runtime type of <paramref name="message"/>.</summary>
     public async ValueTask Dispatch(IPlayer player, IModule[] modules, IMessage message)
     {
         if (!_table.TryGetValue(message.GetType(), out var handlers))
@@ -110,7 +134,23 @@ public sealed class ModuleRegistry
         }
     }
 
-    private readonly record struct PendingHandler(Type ModuleType, int Priority, ModuleHandler Handler);
+    /// <summary>Runs every handler registered for <paramref name="event"/>.</summary>
+    public async ValueTask Dispatch(IPlayer player, IModule[] modules, LifecycleEvent @event)
+    {
+        if (!_lifecycleTable.TryGetValue(@event, out var handlers))
+            return;
+
+        foreach (var handler in handlers)
+        {
+            await handler.Invoke(modules[handler.ModuleIndex], player);
+        }
+    }
+
+    private readonly record struct PendingHandler(Type ModuleType, ModuleHandler Handler);
+
+    private readonly record struct PendingLifecycle(Type ModuleType, LifecycleHandler Handler);
 
     private readonly record struct CompiledHandler(int ModuleIndex, ModuleHandler Invoke);
+
+    private readonly record struct CompiledLifecycle(int ModuleIndex, LifecycleHandler Invoke);
 }

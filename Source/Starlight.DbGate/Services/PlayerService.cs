@@ -27,6 +27,7 @@ public sealed class PlayerService(IServiceScopeFactory scopes, ILogger<PlayerSer
 
         var player = await db.Players
             .AsNoTracking()
+            .Include(p => p.Profile)
             .FirstOrDefaultAsync(p => p.AccountId == msg.AccountUid);
 
         // Existing player: return them untouched.
@@ -64,12 +65,13 @@ public sealed class PlayerService(IServiceScopeFactory scopes, ILogger<PlayerSer
             }
             catch (DbUpdateException ex) when (IsUniqueViolation(ex) && attempt < MaxInsertAttempts)
             {
-                db.Entry(candidate).State = EntityState.Detached;
+                db.ChangeTracker.Clear();
 
                 // Null means it was an ID collision rather than a concurrent create, so the
                 // loop recomputes the next UID.
                 player = await db.Players
                     .AsNoTracking()
+                    .Include(p => p.Profile)
                     .FirstOrDefaultAsync(p => p.AccountId == msg.AccountUid);
             }
             catch (DbUpdateException ex)

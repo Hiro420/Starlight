@@ -15,9 +15,15 @@ internal static partial class DataLoader
     /// </summary>
     public static void Initialize(GameData output)
     {
+        // First pass of data loading.
         Task.WaitAll(
             Task.Run(() => LoadScenePoints(output)),
             Task.Run(() => LoadExcels(output))
+        );
+
+        // Second pass of data loading.
+        Task.WaitAll(
+            Task.Run(() => LoadAvatars(output))
         );
     }
 
@@ -40,8 +46,8 @@ internal static partial class DataLoader
             var typeName = type.Name;
 
             if (typeof(GameData)
-                    .GetField(typeName, BindingFlags.Public | BindingFlags.Static)?
-                    .GetValue(null) is not
+                    .GetField(typeName, BindingFlags.Public | BindingFlags.Instance)?
+                    .GetValue(output) is not
                 IDictionary dictionary)
             {
                 Log.Warning("Resource {0} has an invalid type.", typeName);
@@ -90,6 +96,37 @@ internal static partial class DataLoader
     }
 
     #region Binary Data
+
+    /// <summary>
+    /// Loads every avatar's <c>ConfigAvatar</c> file, keyed by avatar ID.
+    /// </summary>
+    private static void LoadAvatars(GameData output)
+    {
+        var regex = AvatarRegex();
+        var stopwatch = Stopwatch.StartNew();
+
+        var configs = Resources.Loader.ListFiles("BinOutput/Avatar", "ConfigAvatar_*.json")
+            .Select((string? name, AvatarConfig? config) (p) => {
+                var match = regex.Match(p);
+
+                return !match.Success ?
+                    (null, null) :
+                    (match.Groups["name"].Value, Resources.Loader.ReadJson<AvatarConfig>(p));
+            })
+            .Where(p => p.config is not null)
+            .ToDictionary(p => p.name!, p => p.config!);
+
+        // Resolved in this direction because internal names aren't unique; 12 avatars are "Kate".
+        foreach (var (avatarId, avatar) in output.AvatarData)
+        {
+            if (configs.TryGetValue(avatar.AvatarName, out var config))
+            {
+                output.Avatars[avatarId] = config;
+            }
+        }
+
+        Log.Verbose("Loading avatars took {0}ms with {1} entries", stopwatch.ElapsedMilliseconds, output.Avatars.Count);
+    }
 
     /// <summary>
     /// Loads all teleport waypoints for all scenes.
@@ -144,6 +181,9 @@ internal static partial class DataLoader
     #endregion
 
     #region Expressions
+
+    [GeneratedRegex(@"ConfigAvatar_(?<name>.+)\.json")]
+    private static partial Regex AvatarRegex();
 
     [GeneratedRegex(@"scene([0-9]+)_point\.json")]
     private static partial Regex ScenePointRegex();

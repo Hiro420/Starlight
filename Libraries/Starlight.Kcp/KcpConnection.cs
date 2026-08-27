@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Starlight.Kcp.Internals;
 
 namespace Starlight.Kcp;
@@ -6,6 +6,13 @@ namespace Starlight.Kcp;
 public sealed class KcpConnection
 {
     private readonly Internals.Kcp _kcp;
+
+    /// The KCP state is reached from three threads -- the socket receive loop, the 10ms update
+    /// loop, and whichever thread happens to be sending -- and none of its queues are safe to
+    /// touch concurrently. Handler callbacks stay outside it: they reach back into the session,
+    /// which takes a lock of its own before calling <see cref="Send"/>.
+    private readonly Lock _gate = new();
+
     private readonly IKcpServerHandler _handler;
     private readonly Action<byte[], EndPoint> _send;
     private readonly Action<KcpConnection, uint> _onDisconnect;
@@ -34,7 +41,26 @@ public sealed class KcpConnection
         _kcp.SetNodelay(nodelay: true, interval: 10, resend: 2, nc: true);
     }
 
-    public void Send(byte[] data) => _kcp.Send(data);
+    public void Send(byte[] data)
+    {
+        lock (_gate)
+        {
+            _kcp.Send(data);
+            FlushNow();
+        }
+    }
+
+    /// Pushes whatever KCP has queued -- pending ACKs and outbound segments both -- instead of
+    /// letting it wait for the next update tick, which on Windows lands ~15ms out rather than
+    /// the 10 we ask for. The peer smooths its displayed ping from how long our ACKs take to
+    /// come back, so a tick's worth of delay here shows up as latency in-game.
+    /// Refreshing Current first keeps Flush from stamping resend timers off the last tick's
+    /// clock. Flush refuses until the first Update has run; the tick covers that window.
+    private void FlushNow()
+    {
+        _kcp.Current = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _kcp.Flush();
+    }
 
     public void Disconnect(DisconnectReason reason) => Disconnect((uint)reason);
 
@@ -54,30 +80,53 @@ public sealed class KcpConnection
 
     internal void Input(byte[] data)
     {
-        var result = _kcp.Input(new ByteCursor(data));
-        if (result.IsFailure) return;
+        List<byte[]>? received = null;
 
-        var buf = new byte[65536];
-
-        while (true)
+        lock (_gate)
         {
-            var recv = _kcp.Recv(buf);
-            if (recv.IsFailure) break;
+            var result = _kcp.Input(new ByteCursor(data));
+            if (result.IsFailure) return;
 
-            _handler.OnReceive(this, buf[..recv.Value]);
+            // Input only queues the ACKs for what just arrived; nothing sends them.
+            FlushNow();
+
+            var buf = new byte[65536];
+
+            while (true)
+            {
+                var recv = _kcp.Recv(buf);
+                if (recv.IsFailure) break;
+
+                (received ??= []).Add(buf[..recv.Value]);
+            }
+        }
+
+        foreach (var packet in received ?? [])
+        {
+            _handler.OnReceive(this, packet);
         }
     }
 
     internal void Update(long timestamp)
     {
-        _kcp.Update(timestamp);
+        uint? drained = null;
 
-        // A pending graceful disconnect fires once the send buffers have drained,
-        // i.e. the client has acked everything we queued before the kick.
-        if (_lingerReason is {} reason && _kcp.SndQueue.Count == 0 && _kcp.SndBuf.Count == 0)
+        lock (_gate)
         {
-            _lingerReason = null;
-            Disconnect(reason);
+            _kcp.Update(timestamp);
+
+            // A pending graceful disconnect fires once the send buffers have drained,
+            // i.e. the client has acked everything we queued before the kick.
+            if (_lingerReason is {} reason && _kcp.SndQueue.Count == 0 && _kcp.SndBuf.Count == 0)
+            {
+                _lingerReason = null;
+                drained = reason;
+            }
+        }
+
+        if (drained is {} flushed)
+        {
+            Disconnect(flushed);
             return;
         }
 

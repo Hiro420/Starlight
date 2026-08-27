@@ -442,3 +442,8 @@ riderModule.iml
 .idea
 .cursor
 .vscode
+
+# Run artifacts
+data/
+config.json
+starlight.db

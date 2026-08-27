@@ -14,8 +14,9 @@ public interface IResourceLoader
     /// </summary>
     /// <param name="path">The path to the directory, relative to its base.</param>
     /// <param name="searchPattern">The pattern of files to search for.</param>
+    /// <param name="recursive">Should directories be searched?</param>
     /// <returns>A list of file paths, relative to its base.</returns>
-    string[] ListFiles(string path, string searchPattern = "*");
+    string[] ListFiles(string path, string searchPattern = "*", bool recursive = false);
 
     /// <summary>
     /// Reads the raw binary data of a resource.
@@ -70,26 +71,38 @@ internal static class ResourceLoaderExtensions
 
 public class FolderLoader(DirectoryInfo resources) : IResourceLoader
 {
-    public string[] ListFiles(string path, string searchPattern = "*") =>
-        Directory.GetFiles(Path.Combine(resources.FullName, path), searchPattern);
+    public string[] ListFiles(string path, string searchPattern = "*", bool recursive = false) =>
+        Directory.GetFiles(Path.Combine(resources.FullName, path), searchPattern,
+            recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
 
     public byte[] ReadRaw(string path) => File.ReadAllBytes(Path.Combine(resources.FullName, path));
 }
 
 public class ZipLoader(ZipArchive archive) : IResourceLoader
 {
-    public string[] ListFiles(string path, string searchPattern = "*")
+    public string[] ListFiles(string path, string searchPattern = "*", bool recursive = false)
     {
         var regexPattern = "^" + Regex.Escape(searchPattern)
             .Replace(@"\*", ".*")
             .Replace(@"\?", ".") + "$";
         var regex = new Regex(regexPattern, RegexOptions.IgnoreCase);
 
+        // Zip entries always use '/', regardless of the platform which created the archive.
+        var prefix = path.Replace(oldChar: '\\', newChar: '/').Trim('/');
+        if (prefix.Length > 0) prefix += "/";
+
         lock (archive)
         {
             return archive.Entries
-                .Where(e => e.FullName.StartsWith(path) &&
-                            regex.IsMatch(Path.GetFileName(e.FullName)))
+                .Where(e => {
+                    if (!e.FullName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+
+                    // Directory entries have an empty name; they aren't files.
+                    if (e.Name.Length == 0) return false;
+                    if (!recursive && e.FullName.IndexOf(value: '/', prefix.Length) >= 0) return false;
+
+                    return regex.IsMatch(e.Name);
+                })
                 .Select(e => e.FullName)
                 .ToArray();
         }

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Starlight.Game.Modules;
 using Starlight.Kcp;
@@ -25,12 +25,19 @@ public sealed class StarlightPlayer : IPlayer
     }
 
     public uint Uid { get; set; }
+    public string AccountUid { get; set; } = string.Empty;
 
+    /// <inheritdoc/>
     public TModule Module<TModule>() where TModule : class, IModule
         => (TModule)_modules[_registry.IndexOf<TModule>()];
 
+    /// <inheritdoc/>
     public Task Send(IMessage message)
         => _tunnel.Publish(GameSubjects.OutboundPacket, message);
+
+    /// <inheritdoc/>
+    public ValueTask Emit(LifecycleEvent @event)
+        => _registry.Dispatch(this, _modules, @event);
 
     /// <summary>Routes an inbound message to this player's handler modules.</summary>
     internal async ValueTask Dispatch(IMessage message)
@@ -57,6 +64,19 @@ public sealed class StarlightPlayer : IPlayer
                 message.GetType().Name, Uid);
 
             await Disconnect((uint)DisconnectReason.ServerKick, flush: false);
+        }
+    }
+
+    /// <summary>Runs the disconnect lifecycle. The tunnel is already gone, so faults can only be logged.</summary>
+    internal async Task Close()
+    {
+        try
+        {
+            await Emit(LifecycleEvent.PlayerDisconnect);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled error tearing down player '{PlayerId}'", Uid);
         }
     }
 

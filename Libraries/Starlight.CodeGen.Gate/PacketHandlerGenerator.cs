@@ -127,28 +127,16 @@ public sealed class PacketHandlerGenerator : IIncrementalGenerator
             if (!valid)
                 continue;
 
-            var priority = 0;
-
-            foreach (var named in attribute.NamedArguments)
-            {
-                if (named.Key == "Priority" && named.Value.Value is int value)
-                    priority = value;
-            }
-
             var ret = ClassifyReturn(method.ReturnType, iMessage, task1, valueTask1, task, valueTask, packetHead);
 
             models.Add(new Handler(
-                messageType.ToDisplayString(FullyQualified), access, method.Name, args, ret, priority));
+                messageType.ToDisplayString(FullyQualified), access, method.Name, args, ret));
         }
 
-        // One switch case per message type; handlers within a case run by descending
-        // priority, ties broken alphabetically by method name for a stable build order.
+        // One switch case per message type; method-name order only keeps the emitted source stable.
         var groups = models
             .GroupBy(m => m.MessageType)
-            .Select(g => g
-                .OrderByDescending(m => m.Priority)
-                .ThenBy(m => m.Method, StringComparer.Ordinal)
-                .ToList())
+            .Select(g => g.OrderBy(m => m.Method, StringComparer.Ordinal).ToList())
             .ToList();
 
         var anyAsync = models.Any(m => m.Return.Awaitable);
@@ -490,8 +478,7 @@ internal readonly struct Handler(
     string access,
     string method,
     List<string> arguments,
-    ReturnInfo returnInfo,
-    int priority
+    ReturnInfo returnInfo
 )
 {
     public string MessageType { get; } = messageType;
@@ -499,5 +486,4 @@ internal readonly struct Handler(
     public string Method { get; } = method;
     public List<string> Arguments { get; } = arguments;
     public ReturnInfo Return { get; } = returnInfo;
-    public int Priority { get; } = priority;
 }

@@ -17,8 +17,6 @@ public sealed class ConsoleService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            System.Console.Write("> ");
-
             var input = await ReadLineAsync(stoppingToken);
 
             // Cancellation requested (shutdown) or end of input stream.

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Serilog.Events;
 using Starlight.Common;
 using Starlight.DbGate;
+using Starlight.Game;
 using Starlight.Gate;
 using Starlight.SDK;
 
@@ -18,6 +19,7 @@ namespace Starlight;
 public sealed class Config
 {
     public LogEventLevel LogLevel { get; set; } = LogEventLevel.Information;
+    public GameConfig Game { get; set; } = new();
     public GateConfig Gate { get; set; } = new();
     public DbGateConfig DbGate { get; set; } = new();
     public DispatchConfig Dispatch { get; set; } = new();

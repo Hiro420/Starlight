@@ -1,4 +1,4 @@
-using Starlight.Common;
+﻿using Starlight.Common;
 using Starlight.Protobuf.Core;
 using Starlight.Protobuf.Registry;
 using IMessage = Starlight.Protobuf.Core.IMessage;
@@ -20,6 +20,14 @@ public sealed class GamePacket
         head.MergeFrom(RawMetadata);
         return head;
     });
+
+    /// Cheap probe for whether <paramref name="data"/> was decrypted with the right XOR pad,
+    /// for callers that hold more than one candidate pad.
+    public static bool HasValidHeader(ReadOnlySpan<byte> data)
+    {
+        var offset = 0;
+        return data.Length >= sizeof(ushort) && data.ReadBe<ushort>(ref offset) == Header;
+    }
 
     public GamePacket(ReadOnlySpan<byte> data)
     {

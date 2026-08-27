@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Starlight.Game.Modules;
@@ -52,7 +52,9 @@ public sealed class GameServerService(
             logger.LogInformation("Opened gate server connection for '{AccountId}' with {RemoteIp}:{RemotePort}.",
                 sessionInfo.Uid, sessionInfo.RemoteAddr, sessionInfo.RemotePort);
 
-            var player = new StarlightPlayer(services, modules, tunnel);
+            var player = new StarlightPlayer(services, modules, tunnel) {
+                AccountUid = sessionInfo.AccountUid
+            };
 
             // Route inbound packets to the player's handler modules.
             var listener = tunnel.Subscribe(GameSubjects.InboundPacket, async inbound => {
@@ -65,6 +67,7 @@ public sealed class GameServerService(
                     sessionInfo.RemoteAddr, sessionInfo.RemotePort);
 
                 listener.Dispose();
+                _ = player.Close();
             };
         }
         catch (Exception ex)

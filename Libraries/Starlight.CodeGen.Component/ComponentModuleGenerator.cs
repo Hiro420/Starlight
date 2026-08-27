@@ -11,9 +11,10 @@ namespace Starlight.CodeGen.Component;
 /// assembly. Every type implementing <c>IModule</c> is registered with a per-player factory
 /// (<c>(sp, p) =>; ActivatorUtilities.CreateInstance[TModule](sp, p)</c>), so a module's
 /// constructor receives the session <c>IPlayer</c> plus any services resolved from DI; each
-/// <c>[Opcode]</c>-annotated method on those modules is
-/// registered as a handler keyed on its message type. Handlers are bound by analyzing their
-/// parameters (the session <c>IPlayer</c> and/or the message) and their return shape (sync or
+/// <c>[Opcode]</c>-annotated method on those modules is registered as a handler keyed on its
+/// message type, and each <c>[Lifecycle]</c>-annotated method as a handler keyed on its event.
+/// Handlers are bound by analyzing their parameters (the session <c>IPlayer</c> and, for
+/// <c>[Opcode]</c>, the message) and their return shape (sync or
 /// <c>Task</c>/<c>ValueTask</c>, returning nothing, a single message, or an enumerable of
 /// messages); returned messages are sent back through <c>player.Send</c>. The dispatch key is the
 /// message runtime type, never a cmd id, so component modules stay protocol-version agnostic.
@@ -25,6 +26,7 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
     private const string RegistryName = "Starlight.Game.Modules.ModuleRegistry";
     private const string PlayerName = "Starlight.Game.Player.IPlayer";
     private const string OpcodeAttributeName = "Starlight.Protocol.OpcodeAttribute";
+    private const string LifecycleAttributeName = "Starlight.Protocol.LifecycleAttribute";
     private const string MessageName = "Starlight.Protobuf.Core.IMessage";
 
     private static readonly SymbolDisplayFormat FullyQualified = SymbolDisplayFormat.FullyQualifiedFormat;
@@ -39,6 +41,11 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
         "Packet handler '{0}' parameter '{1}' has unsupported type '{2}'; allowed: IPlayer or a message type",
         "Starlight.Components", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
+    private static readonly DiagnosticDescriptor UnsupportedLifecycleParameter = new(
+        "SLCMP003", "Unsupported lifecycle handler parameter",
+        "Lifecycle handler '{0}' parameter '{1}' has unsupported type '{2}'; a lifecycle event carries no message, so only IPlayer can be bound",
+        "Starlight.Components", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
         => context.RegisterSourceOutput(context.CompilationProvider, Generate);
 
@@ -48,10 +55,12 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
         var registry = compilation.GetTypeByMetadataName(RegistryName);
         var player = compilation.GetTypeByMetadataName(PlayerName);
         var opcodeAttr = compilation.GetTypeByMetadataName(OpcodeAttributeName);
+        var lifecycleAttr = compilation.GetTypeByMetadataName(LifecycleAttributeName);
         var iMessage = compilation.GetTypeByMetadataName(MessageName);
 
         // Without these the assembly doesn't reference the module runtime; nothing to do.
-        if (moduleIface is null || registry is null || player is null || opcodeAttr is null || iMessage is null)
+        if (moduleIface is null || registry is null || player is null || opcodeAttr is null ||
+            lifecycleAttr is null || iMessage is null)
             return;
 
         var task1 = compilation.GetTypeByMetadataName("System.Threading.Tasks.Task`1");
@@ -98,13 +107,25 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
 
             foreach (var method in module.GetMembers().OfType<IMethodSymbol>())
             {
-                var attribute = method.GetAttributes().FirstOrDefault(a =>
+                var attributes = method.GetAttributes();
+
+                var lifecycle = attributes.FirstOrDefault(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, lifecycleAttr));
+
+                if (lifecycle is not null)
+                {
+                    EmitLifecycle(spc, sb, module, method, lifecycle, player, iMessage,
+                        task1, valueTask1, task, valueTask);
+                    continue;
+                }
+
+                var opcode = attributes.FirstOrDefault(a =>
                     SymbolEqualityComparer.Default.Equals(a.AttributeClass, opcodeAttr));
 
-                if (attribute is null)
+                if (opcode is null)
                     continue;
 
-                var messageType = ResolveMessageType(attribute, method, iMessage);
+                var messageType = ResolveMessageType(opcode, method, iMessage);
 
                 if (messageType is null)
                 {
@@ -113,7 +134,7 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                EmitHandler(spc, sb, module, method, attribute, messageType, player, iMessage,
+                EmitHandler(spc, sb, module, method, messageType, player, iMessage,
                     task1, valueTask1, task, valueTask);
             }
         }
@@ -130,7 +151,6 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
         StringBuilder sb,
         INamedTypeSymbol module,
         IMethodSymbol method,
-        AttributeData opcode,
         INamedTypeSymbol messageType,
         INamedTypeSymbol player,
         INamedTypeSymbol iMessage,
@@ -165,25 +185,81 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
 
         var ret = ClassifyReturn(method.ReturnType, iMessage, task1, valueTask1, task, valueTask);
 
-        var priority = 0;
-
-        foreach (var named in opcode.NamedArguments)
-        {
-            if (named.Key == "Priority" && named.Value.Value is int value)
-                priority = value;
-        }
-
         // Sending needs an async lambda too, or the next handler in the chain can publish first.
         var isAsync = ret.Awaitable || ret.Send != SendKind.None;
         var asyncMod = isAsync ? "async " : "";
-        sb.AppendLine($"        registry.AddHandler<{moduleFq}, {messageFq}>({priority}, {asyncMod}static (module, player, message) =>");
+        sb.AppendLine($"        registry.AddHandler<{moduleFq}, {messageFq}>({asyncMod}static (module, player, message) =>");
         sb.AppendLine("        {");
         sb.AppendLine($"            var __m = ({moduleFq})module;");
 
         if (usesMessage)
             sb.AppendLine($"            var __msg = ({messageFq})message;");
 
-        var invoke = $"__m.{method.Name}({string.Join(", ", args)})";
+        AppendInvocation(sb, $"__m.{method.Name}({string.Join(", ", args)})", ret);
+
+        if (!isAsync)
+        {
+            sb.AppendLine("            return default;");
+        }
+
+        sb.AppendLine("        });");
+    }
+
+    private static void EmitLifecycle(
+        SourceProductionContext spc,
+        StringBuilder sb,
+        INamedTypeSymbol module,
+        IMethodSymbol method,
+        AttributeData lifecycle,
+        INamedTypeSymbol player,
+        INamedTypeSymbol iMessage,
+        INamedTypeSymbol? task1,
+        INamedTypeSymbol? valueTask1,
+        INamedTypeSymbol? task,
+        INamedTypeSymbol? valueTask
+    )
+    {
+        if (lifecycle.ConstructorArguments.Length == 0 ||
+            lifecycle.ConstructorArguments[0] is not { Kind: TypedConstantKind.Enum } @event)
+            return;
+
+        var moduleFq = module.ToDisplayString(FullyQualified);
+        var args = new List<string>();
+
+        foreach (var parameter in method.Parameters)
+        {
+            if (!IsAssignable(player, parameter.Type))
+            {
+                spc.ReportDiagnostic(Diagnostic.Create(UnsupportedLifecycleParameter,
+                    parameter.Locations.FirstOrDefault(), method.Name, parameter.Name,
+                    parameter.Type.ToDisplayString()));
+                return;
+            }
+
+            args.Add("player");
+        }
+
+        var ret = ClassifyReturn(method.ReturnType, iMessage, task1, valueTask1, task, valueTask);
+
+        var isAsync = ret.Awaitable || ret.Send != SendKind.None;
+        var asyncMod = isAsync ? "async " : "";
+        sb.AppendLine($"        registry.AddLifecycle<{moduleFq}>({EventLiteral(@event)}, {asyncMod}static (module, player) =>");
+        sb.AppendLine("        {");
+        sb.AppendLine($"            var __m = ({moduleFq})module;");
+
+        AppendInvocation(sb, $"__m.{method.Name}({string.Join(", ", args)})", ret);
+
+        if (!isAsync)
+        {
+            sb.AppendLine("            return default;");
+        }
+
+        sb.AppendLine("        });");
+    }
+
+    /// <summary>Emits the handler call plus whatever sends its return shape implies.</summary>
+    private static void AppendInvocation(StringBuilder sb, string invoke, ReturnInfo ret)
+    {
         var call = ret.Awaitable ? $"await {invoke}" : invoke;
 
         switch (ret.Send)
@@ -202,13 +278,20 @@ public sealed class ComponentModuleGenerator : IIncrementalGenerator
                 sb.AppendLine("                    if (__message is not null) await player.Send(__message);");
                 break;
         }
+    }
 
-        if (!isAsync)
-        {
-            sb.AppendLine("            return default;");
-        }
+    /// <summary>Renders an enum constant as its member name, so the generated source reads as <c>LifecycleEvent.PlayerLogin</c>.</summary>
+    private static string EventLiteral(TypedConstant @event)
+    {
+        var type = @event.Type!;
 
-        sb.AppendLine("        });");
+        var name = ((INamedTypeSymbol)type).GetMembers()
+            .OfType<IFieldSymbol>()
+            .FirstOrDefault(f => f.HasConstantValue && Equals(f.ConstantValue, @event.Value))?.Name;
+
+        var typeFq = type.ToDisplayString(FullyQualified);
+
+        return name is null ? $"({typeFq}){@event.Value}" : $"{typeFq}.{name}";
     }
 
     private static INamedTypeSymbol? ResolveMessageType(

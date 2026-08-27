@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Starlight.Gate.Session.Modules;
 using Starlight.Protocol;
 using Starlight.Rpc.Tunnel;
@@ -22,7 +22,10 @@ public interface INetworkSession
     /// Fires when the client disconnects. Pass it to anything a handler awaits.
     CancellationToken Closing { get; }
 
-    byte[] XorPad { set; }
+    /// Stages <paramref name="pad"/> as the session's XOR pad.
+    /// <br/>
+    /// A swap occurs when the current key fails to properly decrypt the packet.
+    void Rekey(byte[] pad);
 
     #endregion
 

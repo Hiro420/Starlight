@@ -1,4 +1,5 @@
 using Starlight.Game.Modules;
+using Starlight.Protocol;
 using IMessage = Starlight.Protobuf.Core.IMessage;
 
 namespace Starlight.Game.Player;
@@ -6,6 +7,10 @@ namespace Starlight.Game.Player;
 public interface IPlayer
 {
     uint Uid { get; internal set; }
+
+    /// The SDK account behind this player. Set from the gate's connect notify, since the
+    /// account uid on PlayerLoginReq comes through empty.
+    string AccountUid { get; internal set; }
 
     /// <summary>Resolves this player's instance of <typeparamref name="TModule"/>.</summary>
     TModule Module<TModule>() where TModule : class, IModule;
@@ -15,4 +20,10 @@ public interface IPlayer
     /// against the next send, or <c>Defer()</c> it.
     /// </summary>
     Task Send(IMessage message);
+
+    /// <summary>
+    /// Runs every <c>[Lifecycle]</c> handler for <paramref name="event"/>, in no particular order.
+    /// Faults propagate, so a <see cref="Starlight.Kcp.KickException"/> from a handler still kicks.
+    /// </summary>
+    ValueTask Emit(LifecycleEvent @event);
 }

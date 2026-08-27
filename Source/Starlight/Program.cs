@@ -13,7 +13,9 @@ using Starlight.Game;
 using Starlight.Game.Modules;
 using Starlight.Protocol.V70;
 using Starlight.Gate;
+using Starlight.Game.Player;
 using Starlight.Game.Resources;
+using Starlight.Game.World;
 using Starlight.Rpc;
 using Starlight.Rpc.Tunnel;
 using Starlight.Rpc.Tunnel.Connection;
@@ -94,6 +96,8 @@ internal static class Program
 
             var moduleRegistry = new ModuleRegistry()
                 .AddGameComponent()
+                .AddPlayerComponent()
+                .AddWorldComponent()
                 .Build();
 
             builder
@@ -111,6 +115,7 @@ internal static class Program
                 .AddCommands()
                 .AddSingleton<GameData>()
                 .AddHostedService(s => s.GetRequiredService<GameData>())
+                .AddSingleton<WorldManager>()
                 // Client crypto contains the RSA keys used in dispatch, gate, & on the client.
                 .AddSingleton(_ => ClientCrypto.Create(builder.GetClientCryptoOptions()))
                 // RPC Tunnel: Used for connecting the gate & game servers.

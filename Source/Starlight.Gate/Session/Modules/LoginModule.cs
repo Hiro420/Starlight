@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Google.Protobuf;
 using Serilog;
@@ -35,18 +35,25 @@ public sealed class LoginModule(INetworkSession session)
             Logger.Warning("Rejecting {Remote}: bad client_rand_key or unknown key_id {KeyId}.",
                 session.Remote, msg.KeyId);
 
-            session.Send(new GetPlayerTokenRsp {
-                Retcode = (int)Retcode.RETCODE_TOKEN_PARAM_ERROR,
-                AccountUid = msg.AccountUid,
-                KeyId = msg.KeyId
-            });
-            session.Disconnect((uint)DisconnectReason.ServerKick, flush: true);
+            Reject(Retcode.RETCODE_TOKEN_PARAM_ERROR, msg);
+            return;
+        }
+
+        var uid = await ResolveUid(msg.AccountUid);
+
+        if (uid is null)
+        {
+            Logger.Warning("Rejecting {Remote}: no player for account '{AccountUid}'.",
+                session.Remote, msg.AccountUid);
+
+            Reject(Retcode.RETCODE_ACCOUNT_INFO_NOT_EXIST, msg);
             return;
         }
 
         // TODO: Pick better server based on population and load.
         var sessionInfo = new PlayerConnectNotify {
-            Uid = 10001,
+            Uid = uid.Value,
+            AccountUid = msg.AccountUid,
             RemoteAddr = session.Remote.Address.ToString(),
             RemotePort = (ushort)session.Remote.Port
         }.ToByteArray();
@@ -74,8 +81,8 @@ public sealed class LoginModule(INetworkSession session)
         session.Send(new GetPlayerTokenRsp {
             ServerRandKey = seed.ServerRandKey,
             Sign = seed.Signature,
+            Uid = uid.Value,
             // TODO: Replace with dynamic variables.
-            Uid = 10001,
             AccountUid = msg.AccountUid,
             Token = "somethingreallylong",
             PlatformType = msg.PlatformType,
@@ -88,7 +95,36 @@ public sealed class LoginModule(INetworkSession session)
         // Derive the session XOR-pad from the server seed. The client recovers
         // this same value as (clientSeed ^ server_rand_key); server_rand_key
         // carries the combined seed so only the holder of clientSeed can extract it.
-        session.XorPad = MtKey.Generate((ulong)seed.ServerSeed);
+        session.Rekey(MtKey.Generate((ulong)seed.ServerSeed));
+    }
+
+    /// <summary>Looks up the uid backing <paramref name="accountUid"/>, or null if it can't be had.</summary>
+    private async Task<uint?> ResolveUid(string accountUid)
+    {
+        try
+        {
+            var response = await session.Server.Rpc.Request<FetchPlayerReq, FetchPlayerRsp>(
+                GameSubjects.FetchPlayer,
+                new FetchPlayerReq { AccountUid = accountUid, Create = true },
+                ct: session.Closing);
+
+            return response is { Player: {} player, Retcode: StarlightRetcode.Success } ? player.Uid : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.Warning(ex, "Failed to resolve a uid for account '{AccountUid}'", accountUid);
+            return null;
+        }
+    }
+
+    private void Reject(Retcode retcode, GetPlayerTokenReq msg)
+    {
+        session.Send(new GetPlayerTokenRsp {
+            Retcode = (int)retcode,
+            AccountUid = msg.AccountUid,
+            KeyId = msg.KeyId
+        });
+        session.Disconnect((uint)DisconnectReason.ServerKick, flush: true);
     }
 
     /// Mixes the client's seed with a fresh server one, then encrypts and signs the result.
