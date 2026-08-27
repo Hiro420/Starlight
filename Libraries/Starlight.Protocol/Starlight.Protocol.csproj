@@ -1,18 +1,15 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>Starlight.Game.Resources</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Starlight.Common\Starlight.Common.csproj"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <PackageReference Include="JetBrains.Annotations" Version="2026.2.0"/>
+        <ProjectReference Include="..\Starlight.Protobuf\Starlight.Protobuf.csproj"/>
+        <ProjectReference Include="..\..\Protocol\Starlight.Protocol.Base\Starlight.Protocol.Base.csproj"/>
     </ItemGroup>
 
 </Project>

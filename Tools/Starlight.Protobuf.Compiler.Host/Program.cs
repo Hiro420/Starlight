@@ -82,7 +82,9 @@ if (crash is not null)
     return 1;
 }
 
-return 0;
+// An invalid schema surfaces as a diagnostic, not a throw, so CI gating on the exit code
+// would otherwise wave it through.
+return diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error) ? 1 : 0;
 
 file sealed class ProtoText(string path) : AdditionalText
 {

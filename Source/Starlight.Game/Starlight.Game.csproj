@@ -7,13 +7,21 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\..\Game\Starlight.Game.Resources\Starlight.Game.Resources.csproj"/>
+        <ProjectReference Include="..\..\Protocol\Starlight.Protocol.Base\Starlight.Protocol.Base.csproj"/>
+        <ProjectReference Include="..\..\Protocol\Starlight.Protocol.V66\Starlight.Protocol.V66.csproj"/>
+        <ProjectReference Include="..\..\Libraries\Starlight.CodeGen.Component\Starlight.CodeGen.Component.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Common\Starlight.Common.csproj"/>
+        <ProjectReference Include="..\..\Libraries\Starlight.Protocol\Starlight.Protocol.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Rpc.Tunnel\Starlight.Rpc.Tunnel.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Rpc\Starlight.Rpc.csproj"/>
-        <ProjectReference Include="..\..\Protocol\Starlight.Game.Protocol.Base\Starlight.Game.Protocol.Base.csproj"/>
-        <ProjectReference Include="..\..\Protocol\Starlight.Game.Protocol.V66\Starlight.Game.Protocol.V66.csproj"/>
-        <ProjectReference Include="..\..\Libraries\Starlight.Game.Resources\Starlight.Game.Resources.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Kcp\Starlight.Kcp.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The generated registrations call ActivatorUtilities, so don't rely on it arriving transitively. -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="11.0.0-preview.5.26302.115"/>
     </ItemGroup>
 
 </Project>

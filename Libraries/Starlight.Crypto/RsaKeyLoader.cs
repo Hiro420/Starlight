@@ -6,7 +6,7 @@ namespace Starlight.Crypto;
 /// Shared helpers for reading RSA key material from disk or base64 strings,
 /// transparently accepting both DER bytes and PEM text.
 /// </summary>
-internal static class RsaKeyLoader
+public static class RsaKeyLoader
 {
     private const string PrivatePemBegin = "-----BEGIN PRIVATE KEY-----";
     private const string PrivatePemEnd = "-----END PRIVATE KEY-----";
@@ -35,14 +35,24 @@ internal static class RsaKeyLoader
 
         if (contents.Contains(PemBeginPrefix, StringComparison.Ordinal))
         {
-            if (!contents.Contains(PrivatePemBegin, StringComparison.Ordinal)
-                && !contents.Contains(Pkcs1PrivatePemBegin, StringComparison.Ordinal)
-                && !contents.Contains(EncryptedPrivatePemBegin, StringComparison.Ordinal))
+            // ImportFromPem can't unwrap a passphrase; without this it throws an opaque
+            // CryptographicException from wherever the key happens to be loaded.
+            if (contents.Contains(EncryptedPrivatePemBegin, StringComparison.Ordinal))
             {
                 rsa.Dispose();
 
                 throw new ArgumentException(
-                    $"'{path}' is not a private-key PEM (expected PKCS#8, PKCS#1, or encrypted private key).",
+                    $"'{path}' is an encrypted private key, which is not supported. Decrypt it first.",
+                    nameof(path));
+            }
+
+            if (!contents.Contains(PrivatePemBegin, StringComparison.Ordinal)
+                && !contents.Contains(Pkcs1PrivatePemBegin, StringComparison.Ordinal))
+            {
+                rsa.Dispose();
+
+                throw new ArgumentException(
+                    $"'{path}' is not a private-key PEM (expected PKCS#8 or PKCS#1).",
                     nameof(path));
             }
 

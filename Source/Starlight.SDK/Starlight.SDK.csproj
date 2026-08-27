@@ -14,23 +14,19 @@
     <ItemGroup>
         <ProjectReference Include="..\..\Libraries\Starlight.Common\Starlight.Common.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Crypto\Starlight.Crypto.csproj"/>
+        <ProjectReference Include="..\..\Libraries\Starlight.Crypto.Client\Starlight.Crypto.Client.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Ec2b\Starlight.Ec2b.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Rpc\Starlight.Rpc.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Sqlite\Starlight.Sqlite.csproj"/>
     </ItemGroup>
 
-
     <ItemGroup>
         <PackageReference Include="Serilog.AspNetCore" Version="10.0.0"/>
-        <PackageReference Include="Grpc.Tools" Version="2.81.1">
+        <PackageReference Include="Grpc.Tools" Version="2.81.0">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
         <PackageReference Include="Google.Protobuf" Version="3.35.1"/>
-    </ItemGroup>
-
-    <ItemGroup>
-        <EmbeddedResource Include="Resources\Keys\*.pem"/>
     </ItemGroup>
 
     <ItemGroup>

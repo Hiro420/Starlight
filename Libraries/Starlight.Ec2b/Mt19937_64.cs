@@ -13,6 +13,11 @@ public sealed class Mt19937_64
 
     public Mt19937_64(ulong seed)
     {
+        Init(seed);
+    }
+
+    public void Init(ulong seed)
+    {
         _mt[0] = seed;
 
         for (_mti = 1; _mti < Nn; _mti++)

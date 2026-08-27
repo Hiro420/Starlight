@@ -4,12 +4,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Starlight.Common;
+using Starlight.Crypto.Client;
 using Starlight.Ec2b;
 using Starlight.Gate.Session;
 using Starlight.Kcp;
 using Starlight.Protobuf.Registry;
 using Starlight.Rpc;
 using Starlight.Rpc.Proto;
+using Starlight.Rpc.Tunnel;
+using Starlight.Rpc.Tunnel.Connection;
 using KcpLogLevel = Starlight.Kcp.LogLevel;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
@@ -17,27 +20,28 @@ namespace Starlight.Gate;
 
 public sealed class GateServerService(
     RpcTransport rpc,
+    ClientCrypto crypto,
     ProtocolRegistryProvider registryProvider,
+    ITunnelConnector connector,
     IConfiguration config,
     ILogger<GateServerService> logger
-) : BackgroundService, IKcpServerHandler
+)
+    : BackgroundService, IKcpServerHandler
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(15);
 
-    private readonly ConcurrentDictionary<KcpConnection, INetworkSession> _sessions = new();
     private readonly Lazy<GateConfig> _config = new(() => config.GetSection("Gate").Get<GateConfig>() ?? new GateConfig());
+    private readonly ConcurrentDictionary<KcpConnection, INetworkSession> _sessions = new();
 
     public GateConfig Config => _config.Value;
+    public TunnelClient Tunnel { get; } = new(rpc, connector);
+    public ClientCrypto ClientCrypto { get; } = crypto;
 
-    private CancellationToken _ct = CancellationToken.None;
-
-    public ProtocolRegistryProvider Registry => registryProvider;
+    public ProtocolRegistryProvider Registry { get; } = registryProvider;
     public byte[] ServerKey { get; private set; } = [];
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
-        _ct = ct;
-
         // From the region ID, derive the client secret & XOR key.
         var secret = Ec2bKeyGen.Create(Config.RegionId);
         ServerKey = Ec2bHelper.Derive(secret);
@@ -122,16 +126,7 @@ public sealed class GateServerService(
     {
         if (_sessions.TryGetValue(conn, out var session))
         {
-            Task.Run(async () => {
-                try
-                {
-                    await session.HandlePacket(data);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to handle packet for {Remote}", conn.Remote);
-                }
-            }, _ct);
+            session.Receive(data);
         }
 
         logger.LogTrace("Received {Length} bytes from {Remote}", data.Length, conn.Remote);
@@ -142,6 +137,11 @@ public static class GateServerExtensions
 {
     public static IHostApplicationBuilder AddGateServer(this IHostApplicationBuilder builder, params ProtocolRegistry[] registries)
     {
+        var config = builder.Configuration.GetSection("Gate").Get<GateConfig>() ?? new GateConfig();
+
+        builder.TrySetSigningKeyPath("Gate server", config.Keys.SigningKeyPath);
+        builder.TrySetSdkKeyPath("Gate server", config.Keys.SdkKeyPath);
+
         builder.Services
             .AddSingleton(new ProtocolRegistryProvider(registries))
             .AddHostedService<GateServerService>();

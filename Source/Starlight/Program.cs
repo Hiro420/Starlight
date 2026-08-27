@@ -8,7 +8,10 @@ using Serilog.Events;
 using Serilog.Sinks.SystemConsole.Themes;
 using Starlight.DbGate;
 using Starlight.Console;
-using Starlight.Game.Protocol.V66;
+using Starlight.Crypto.Client;
+using Starlight.Game;
+using Starlight.Game.Modules;
+using Starlight.Protocol.V66;
 using Starlight.Gate;
 using Starlight.Game.Resources;
 using Starlight.Rpc;
@@ -26,7 +29,7 @@ internal static class Program
 
     public static readonly LoggingLevelSwitch
         LogLevel = new(),
-        HttpLogLevel = new(LogEventLevel.Warning);
+        VerboseLogLevel = new(LogEventLevel.Warning);
 
     private const string LoggerConsoleTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss} « {Level:u3} » {Message:lj}{NewLine}{Exception}";
     private const string LoggerFileTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss} « {Level:u3} » {Message:lj}{NewLine}";
@@ -63,15 +66,15 @@ internal static class Program
             .MinimumLevel.ControlledBy(LogLevel)
             .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.Extensions.Hosting", LogEventLevel.Warning)
-            .MinimumLevel.Override("Microsoft.AspNetCore", HttpLogLevel)
+            .MinimumLevel.Override("Microsoft.AspNetCore", VerboseLogLevel)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", VerboseLogLevel)
             .WriteTo.Console(
                 outputTemplate: LoggerConsoleTemplate,
                 theme: LoggerTheme)
             .WriteTo.File(
                 "logs/latest.log",
                 rollingInterval: RollingInterval.Day,
-                outputTemplate: LoggerFileTemplate,
-                restrictedToMinimumLevel: LogEventLevel.Information)
+                outputTemplate: LoggerFileTemplate)
             .CreateLogger();
         Log.Information("Starting Starlight...");
 
@@ -89,23 +92,36 @@ internal static class Program
             LogLevel.MinimumLevel = builder.Configuration
                 .GetValue("LogLevel", LogEventLevel.Information);
 
-            builder.Services
+            var moduleRegistry = new ModuleRegistry()
+                .AddGameComponent()
+                .Build();
+
+            builder
+                // Add server services.
+                // These are all the servers we run in our Starlight launcher.
+                .AddSdkServer()
+                .AddDispatchServer()
+                .AddDbGate()
+                .AddGateServer(new V66ProtocolRegistry())
+                .AddGameServer(moduleRegistry)
+                // Add dependency services.
+                // The server services use these to operate.
+                .Services
                 .AddSerilog()
                 .AddCommands()
                 .AddSingleton<GameData>()
-                .AddSingleton<RpcTransport, DirectRpcTransport>()
+                .AddHostedService(s => s.GetRequiredService<GameData>())
+                // Client crypto contains the RSA keys used in dispatch, gate, & on the client.
+                .AddSingleton(_ => ClientCrypto.Create(builder.GetClientCryptoOptions()))
+                // RPC Tunnel: Used for connecting the gate & game servers.
                 .AddSingleton<ITunnelBroker, DirectTunnelBroker>()
                 .AddSingleton<ITunnelConnector, DirectTunnelConnector>()
                 .AddSingleton<ITunnelAcceptor, DirectTunnelAcceptor>()
                 .AddSingleton<TunnelClient>()
                 .AddSingleton<TunnelHost>()
+                // RPC: Used for sending messages between services.
+                .AddSingleton<RpcTransport, DirectRpcTransport>()
                 .AddHostedService(s => s.GetRequiredService<RpcTransport>());
-
-            builder
-                .AddSdkServer()
-                .AddDispatchServer()
-                .AddDbGate()
-                .AddGateServer(new V66ProtocolRegistry());
 
             // Prepare the application.
             var app = builder.Build();
@@ -119,7 +135,7 @@ internal static class Program
                 .MapDispatchServer();
 
             StartTime.Stop();
-            Log.Information("Done! Finished starting in {Elapsed}ms.", StartTime.ElapsedMilliseconds);
+            Log.Information("Finished initializing in {Elapsed}ms.", StartTime.ElapsedMilliseconds);
 
             await app.RunAsync();
             return 0;

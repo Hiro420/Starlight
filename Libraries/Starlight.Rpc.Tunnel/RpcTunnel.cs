@@ -45,6 +45,19 @@ public abstract class RpcTunnel : IDisposable
     public Task Publish(int id, IMessage message) => Publish(id, Serialize(message));
     public Task Publish(string id, IMessage message) => Publish(id, Serialize(message));
 
+    /// <summary>Publishes <paramref name="message"/> with opaque <paramref name="header"/> bytes carried alongside it.</summary>
+    public Task Publish(int id, IMessage message, byte[]? header) => Publish(id, WithHeader(message, header));
+
+    /// <inheritdoc cref="Publish(int,IMessage,byte[])"/>
+    public Task Publish(string id, IMessage message, byte[]? header) => Publish(id, WithHeader(message, header));
+
+    private TunnelMessage WithHeader(IMessage message, byte[]? header)
+    {
+        var serialized = Serialize(message);
+        serialized.Header = header;
+        return serialized;
+    }
+
     public IDisposable Subscribe<T>(int id, AsyncTunnelHandler<T> handler) where T : class, IMessage
         => Subscribe(id, Wrap(handler));
 
@@ -138,8 +151,7 @@ public abstract class RpcTunnel : IDisposable
     }
 
     protected virtual void OnSelfClosed()
-    {
-    }
+    {}
 
     /// <summary>Called by the peer's <see cref="Close"/>; cancels without re-notifying.</summary>
     protected void MarkClosedFromPeer()
