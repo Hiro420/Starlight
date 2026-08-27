@@ -1,5 +1,10 @@
-on: [push, pull_request]
 name: Continuous Integration
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: true
@@ -23,6 +28,13 @@ jobs:
               with:
                   dotnet-version: 10.0.x
 
+            - name: Cache NuGet packages
+              uses: actions/cache@v4
+              with:
+                  path: ~/.nuget/packages
+                  key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.*.props') }}
+                  restore-keys: nuget-${{ runner.os }}-
+
             - name: Restore
               run: dotnet restore Starlight.slnx
 
@@ -34,35 +46,110 @@ jobs:
 
     inspect-code:
         name: Code Quality
-        runs-on: windows-latest
+        runs-on: ubuntu-latest
         timeout-minutes: 60
         steps:
             - name: Checkout
               uses: actions/checkout@v6
               with:
                   submodules: recursive
+                  fetch-depth: 0
 
             - name: Setup .NET
               uses: actions/setup-dotnet@v4
               with:
                   dotnet-version: 10.0.x
 
+            - name: Cache NuGet packages
+              uses: actions/cache@v4
+              with:
+                  path: ~/.nuget/packages
+                  key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.*.props') }}
+                  restore-keys: nuget-${{ runner.os }}-
+
+            - name: Cache ReSharper caches
+              uses: actions/cache@v4
+              with:
+                  path: ~/.jb-caches
+                  key: jb-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.slnx') }}-${{ github.run_id }}
+                  restore-keys: |
+                      jb-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.slnx') }}-
+                      jb-${{ runner.os }}-
+
             - name: Install ReSharper command line tools
               run: dotnet tool install -g JetBrains.ReSharper.GlobalTools --version "2025.3.*"
 
-            - name: Add global tools to PATH
-              run: echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+            - name: Restore
+              run: dotnet restore Starlight.slnx
+
+            - name: Determine cleanup scope
+              id: scope
+              env:
+                  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+              run: |
+                  set -euo pipefail
+
+                  # Not a pull request: clean the whole solution.
+                  if [ -z "${BASE_SHA:-}" ]; then
+                      echo "Push build - cleaning the full solution."
+                      echo "include=" >> "$GITHUB_OUTPUT"
+                      echo "skip=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+
+                  mapfile -t changed < <(
+                      git diff --name-only --diff-filter=ACMR "$BASE_SHA...HEAD" -- '*.cs' '*.csproj' '*.props' '*.targets'
+                  )
+
+                  if [ "${#changed[@]}" -eq 0 ]; then
+                      echo "No cleanable files changed - skipping."
+                      echo "include=" >> "$GITHUB_OUTPUT"
+                      echo "skip=true" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+
+                  if [ "${#changed[@]}" -gt 200 ]; then
+                      echo "${#changed[@]} files changed - cleaning the full solution instead."
+                      echo "include=" >> "$GITHUB_OUTPUT"
+                      echo "skip=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+
+                  printf 'Scoping cleanup to %d changed file(s):\n' "${#changed[@]}"
+                  printf '  %s\n' "${changed[@]}"
+
+                  include=$(IFS=';'; echo "${changed[*]}")
+                  echo "include=$include" >> "$GITHUB_OUTPUT"
+                  echo "skip=false" >> "$GITHUB_OUTPUT"
 
             - name: Clean up code with .editorconfig
-              run: 'jb cleanupcode Starlight.slnx --profile="Built-in: Reformat & Apply Syntax Style" --verbosity=WARN'
+              if: steps.scope.outputs.skip != 'true'
+              env:
+                  INCLUDE: ${{ steps.scope.outputs.include }}
+              run: |
+                  set -euo pipefail
+
+                  args=(
+                      Starlight.slnx
+                      --profile="Built-in: Reformat & Apply Syntax Style"
+                      --no-build
+                      --caches-home="$HOME/.jb-caches"
+                      --no-updates
+                      --verbosity=WARN
+                  )
+
+                  if [ -n "$INCLUDE" ]; then
+                      args+=(--include="$INCLUDE")
+                  fi
+
+                  jb cleanupcode "${args[@]}"
 
             - name: Verify code matches .editorconfig
-              shell: pwsh
               run: |
-                  if (git status --porcelain) {
-                      Write-Host "::error::Code does not match .editorconfig. Run 'Code Cleanup' (Reformat & Apply Syntax Style) in Rider and push the result."
+                  if ! git diff --quiet; then
+                      echo "::error::Code does not match .editorconfig. Run 'Code Cleanup' (Reformat & Apply Syntax Style) in Rider and push the result."
                       git diff --stat
                       git diff
                       exit 1
-                  }
-                  Write-Host "Code matches .editorconfig."
+                  fi
+                  echo "Code matches .editorconfig."
