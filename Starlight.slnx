@@ -25,7 +25,7 @@
     </Folder>
     <Folder Name="/Protocol/">
         <Project Path="Protocol/Starlight.Protocol.Base/Starlight.Protocol.Base.csproj"/>
-        <Project Path="Protocol/Starlight.Protocol.V66/Starlight.Protocol.V66.csproj"/>
+        <Project Path="Protocol/Starlight.Protocol.V70/Starlight.Protocol.V70.csproj"/>
     </Folder>
     <Folder Name="/Servers/">
         <Project Path="Source/Starlight.Game/Starlight.Game.csproj"/>

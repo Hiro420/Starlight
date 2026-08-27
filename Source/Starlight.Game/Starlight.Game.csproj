@@ -9,7 +9,6 @@
     <ItemGroup>
         <ProjectReference Include="..\..\Game\Starlight.Game.Resources\Starlight.Game.Resources.csproj"/>
         <ProjectReference Include="..\..\Protocol\Starlight.Protocol.Base\Starlight.Protocol.Base.csproj"/>
-        <ProjectReference Include="..\..\Protocol\Starlight.Protocol.V66\Starlight.Protocol.V66.csproj"/>
         <ProjectReference Include="..\..\Libraries\Starlight.CodeGen.Component\Starlight.CodeGen.Component.csproj"
                           OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
         <ProjectReference Include="..\..\Libraries\Starlight.Common\Starlight.Common.csproj"/>

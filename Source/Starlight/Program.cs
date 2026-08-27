@@ -11,7 +11,7 @@ using Starlight.Console;
 using Starlight.Crypto.Client;
 using Starlight.Game;
 using Starlight.Game.Modules;
-using Starlight.Protocol.V66;
+using Starlight.Protocol.V70;
 using Starlight.Gate;
 using Starlight.Game.Resources;
 using Starlight.Rpc;
@@ -102,7 +102,7 @@ internal static class Program
                 .AddSdkServer()
                 .AddDispatchServer()
                 .AddDbGate()
-                .AddGateServer(new V66ProtocolRegistry())
+                .AddGateServer(new V70ProtocolRegistry())
                 .AddGameServer(moduleRegistry)
                 // Add dependency services.
                 // The server services use these to operate.
