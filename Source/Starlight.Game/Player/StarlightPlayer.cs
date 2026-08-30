@@ -4,6 +4,7 @@ using Starlight.Game.Modules;
 using Starlight.Kcp;
 using Starlight.Protocol;
 using Starlight.Rpc;
+using Starlight.Rpc.Proto;
 using Starlight.Rpc.Tunnel;
 using IMessage = Starlight.Protobuf.Core.IMessage;
 
@@ -26,6 +27,9 @@ public sealed class StarlightPlayer : IPlayer
 
     public uint Uid { get; set; }
     public string AccountUid { get; set; } = string.Empty;
+    public CancellationToken Closing => _tunnel.Closed;
+    public NetPlayerState State { get; set; } = new();
+    public object StateLock { get; } = new();
 
     /// <inheritdoc/>
     public TModule Module<TModule>() where TModule : class, IModule
@@ -70,6 +74,15 @@ public sealed class StarlightPlayer : IPlayer
     /// <summary>Runs the disconnect lifecycle. The tunnel is already gone, so faults can only be logged.</summary>
     internal async Task Close()
     {
+        try
+        {
+            await Emit(LifecycleEvent.PlayerSaving);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled error saving player '{PlayerId}'", Uid);
+        }
+
         try
         {
             await Emit(LifecycleEvent.PlayerDisconnect);
