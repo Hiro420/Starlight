@@ -19,6 +19,91 @@ namespace Starlight.Tests;
 public sealed class AvatarEquipTests
 {
     [Fact]
+    public async Task SetPlayerBornData_ConcurrentRequests_OnlyInitializeOneTraveler()
+    {
+        var data = Data();
+        var (player, sent) = Player(uid: 1001, data);
+        player.State.BornState = NetPlayerState.Types.PlayerBornState.Pending;
+        var born = player.Module<BornModule>();
+
+        await Task.WhenAll(
+            born.OnSetPlayerBornData(new SetPlayerBornDataReq {
+                AvatarId = 10000005,
+                NickName = "Aether"
+            }),
+            born.OnSetPlayerBornData(new SetPlayerBornDataReq {
+                AvatarId = 10000007,
+                NickName = "Lumine"
+            }));
+
+        var responses = sent.OfType<SetPlayerBornDataRsp>().ToArray();
+        Assert.Equal(expected: 2, responses.Length);
+        Assert.Single(responses, response => response.Retcode == 0);
+
+        Assert.Single(
+            responses,
+            response => response.Retcode == (int)Retcode.RETCODE_REPEAT_SET_PLAYER_BORN_DATA);
+
+        var traveler = Assert.Single(player.State.Avatars);
+        Assert.Equal(traveler.AvatarId, player.State.BornAvatarId);
+
+        Assert.Equal(
+            traveler.AvatarId == 10000005 ? "Aether" : "Lumine",
+            player.Profile.Nickname);
+    }
+
+    [Fact]
+    public async Task SetPlayerBornData_PersistsNicknameAndSelectedTraveler()
+    {
+        var data = Data();
+        var (player, sent) = Player(uid: 1001, data);
+        player.State.BornState = NetPlayerState.Types.PlayerBornState.Pending;
+
+        await player.Module<BornModule>().OnSetPlayerBornData(
+            new SetPlayerBornDataReq {
+                AvatarId = 10000007,
+                NickName = "Lumine"
+            });
+
+        var response = Assert.Single(sent.OfType<SetPlayerBornDataRsp>());
+        Assert.Equal(expected: 0, response.Retcode);
+        Assert.Equal("Lumine", player.Profile.Nickname);
+        Assert.Equal(expected: 10000007u, player.State.BornAvatarId);
+
+        Assert.Equal(
+            NetPlayerState.Types.PlayerBornState.Complete,
+            player.State.BornState);
+
+        var traveler = Assert.Single(player.Module<AvatarModule>().Team);
+        Assert.Equal(expected: 10000007u, traveler.AvatarId);
+        Assert.Single(player.State.Avatars, state => state.AvatarId == 10000007);
+
+        var nicknameNotify = Assert.Single(sent.OfType<PlayerNicknameNotify>());
+        Assert.Equal("Lumine", nicknameNotify.Nickname);
+
+        var snapshot = new SavePlayerReq {
+            Uid = player.Uid,
+            State = player.State,
+            Profile = player.Profile
+        };
+        var restored = SavePlayerReq.Parser.ParseFrom(snapshot.ToByteArray());
+
+        Assert.Equal("Lumine", restored.Profile?.Nickname);
+        Assert.Equal(expected: 10000007u, restored.State?.BornAvatarId);
+
+        var (reconnected, _) = Player(uid: 1001, data);
+        reconnected.State = restored.State ?? new NetPlayerState();
+        reconnected.Profile = restored.Profile ?? new NetPlayerProfile();
+        await reconnected.Module<AvatarModule>().OnLogin();
+
+        Assert.Equal("Lumine", reconnected.Profile.Nickname);
+
+        Assert.Equal(
+            expected: 10000007u,
+            Assert.Single(reconnected.Module<AvatarModule>().Team).AvatarId);
+    }
+
+    [Fact]
     public async Task WearEquip_UpdatesAvatarNotifiesAndPersists()
     {
         var data = Data();
@@ -137,6 +222,7 @@ public sealed class AvatarEquipTests
         var guidManager = new GuidManager(serverId: 1);
         registry.AddModule<InventoryModule>((_, player) => new InventoryModule(player, guidManager, data));
         registry.AddModule<AvatarModule>((_, player) => new AvatarModule(player, data, guidManager));
+        registry.AddModule<BornModule>((_, player) => new BornModule(player));
         registry.Build();
 
         var (client, server) = DirectTunnel.CreatePair();
