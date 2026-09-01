@@ -1,3 +1,4 @@
+using Serilog;
 using Starlight.Game.Ability;
 using Starlight.Game.Modules;
 using Starlight.Game.Player;
@@ -7,7 +8,7 @@ using Starlight.Rpc.Proto;
 
 namespace Starlight.Game.World;
 
-public sealed class SceneModule(IPlayer player) : IModule
+public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder) : IModule
 {
     #region Beach Simulator
 
@@ -20,6 +21,8 @@ public sealed class SceneModule(IPlayer player) : IModule
     private readonly List<SceneEntityInfo> _spawned = [];
     private readonly Dictionary<ulong, AvatarEntity> _teamEntities = [];
     private ulong _currentAvatarGuid;
+
+    private MotionInfo? _lastCurrentMotion;
 
     #endregion
 
@@ -49,17 +52,38 @@ public sealed class SceneModule(IPlayer player) : IModule
         var notification = new SceneTeamUpdateNotify();
         var nextEntities = new Dictionary<ulong, AvatarEntity>();
 
+        var outgoing = _teamEntities.GetValueOrDefault(_currentAvatarGuid);
+        var outgoingPos = outgoing?.Info.MotionInfo?.Pos ?? _lastCurrentMotion?.Pos ?? SpawnPosition;
+        var outgoingRot = outgoing?.Info.MotionInfo?.Rot ?? _lastCurrentMotion?.Rot ?? new Vector();
+        var outgoingRef = outgoing?.Info.MotionInfo?.RefPos ?? _lastCurrentMotion?.RefPos ?? new Vector();
+
         foreach (var avatar in team.Avatars)
         {
+            var isIncomingCurrent = avatar.Guid == team.CurrentAvatarGuid;
+
             if (!_teamEntities.TryGetValue(avatar.Guid, out var entity))
             {
+                var position = isIncomingCurrent ? outgoingPos : SpawnPosition;
+                var rotation = isIncomingCurrent ? outgoingRot : new Vector();
+                var refPos = isIncomingCurrent ? outgoingRef : new Vector();
+
                 entity = AvatarEntity.Create(
                     module.World,
                     player.Uid,
                     module.PeerId,
                     avatar,
-                    SpawnPosition);
+                    position,
+                    rotation,
+                    refPos);
+            } else if (isIncomingCurrent && entity.Info.MotionInfo is {} motion)
+            {
+                motion.Pos = outgoingPos;
+                motion.Rot = outgoingRot;
+                motion.RefPos = outgoingRef;
             }
+
+            if (entity.Info.MotionInfo is {} standbyMotion)
+                standbyMotion.State = MotionState.MOTION_STATE_STANDBY;
 
             nextEntities.Add(avatar.Guid, entity);
 
@@ -104,6 +128,9 @@ public sealed class SceneModule(IPlayer player) : IModule
         _teamEntities.TryGetValue(_currentAvatarGuid, out var previous);
         nextEntities.TryGetValue(team.CurrentAvatarGuid, out var current);
         var currentChanged = _currentAvatarGuid != team.CurrentAvatarGuid;
+
+        if (current is not null && current.Info.MotionInfo is {} curMotion)
+            _lastCurrentMotion = curMotion;
 
         _teamEntities.Clear();
 
@@ -199,6 +226,7 @@ public sealed class SceneModule(IPlayer player) : IModule
         _spawned.Clear();
         _teamEntities.Clear();
         _currentAvatarGuid = team.CurrentAvatarGuid;
+        _lastCurrentMotion = null;
 
         foreach (var avatar in team.Avatars)
         {
@@ -225,6 +253,7 @@ public sealed class SceneModule(IPlayer player) : IModule
             {
                 enterInfo.CurAvatarEntityId = entity.EntityId;
                 _spawned.Add(entity.Info);
+                _lastCurrentMotion = entity.Info.MotionInfo;
             }
 
             enterInfo.AvatarEnterInfo.Add(new AvatarEnterSceneInfo {
@@ -268,6 +297,110 @@ public sealed class SceneModule(IPlayer player) : IModule
         };
 
         yield return new EnterSceneDoneRsp { EnterSceneToken = msg.EnterSceneToken };
+    }
+
+    [Opcode]
+    public async Task OnCombatInvocations(CombatInvocationsNotify notify)
+    {
+        foreach (var invoke in notify.InvokeList)
+        {
+            switch (invoke.ArgumentType)
+            {
+                case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_ENTITY_MOVE:
+                    HandleEntityMove(invoke.CombatData);
+                    break;
+                case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_EVT_BEING_HIT:
+                    HandleBeingHit(invoke.CombatData);
+                    break;
+                case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_SET_ATTACK_TARGET:
+                    HandleSetAttackTarget(invoke.CombatData);
+                    break;
+                case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_ANIMATOR_PARAMETER_CHANGED:
+                    HandleAnimatorParameter(invoke.CombatData);
+                    break;
+                case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_BEING_HEALED_NTF:
+                    HandleBeingHealed(invoke.CombatData);
+                    break;
+                case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_SKILL_ANCHOR_POSITION_NTF:
+                    HandleSkillAnchorPosition(invoke.CombatData);
+                    break;
+                default:
+                    Log.Debug("Unhandled combat invoke: ArgumentType={ArgumentType}", invoke.ArgumentType);
+                    break;
+            }
+        }
+
+        foreach (var group in notify.InvokeList.GroupBy(invoke => invoke.ForwardType))
+        {
+            // TODO: CombatInvokeEntry carries no forward_peer. With co-op we'll need to
+            // map the targeted peer here for FORWARD_TYPE_TO_PEER / FORWARD_TYPE_TO_PEERS.
+            await forwarder.Forward(
+                player,
+                group.Key,
+                new CombatInvocationsNotify { InvokeList = [.. group] },
+                forwardPeer: 0);
+        }
+    }
+
+    private void HandleEntityMove(Google.Protobuf.ByteString data)
+    {
+        if (!TryDecode(data, out EntityMoveInfo move) || move.MotionInfo is not {} incoming)
+            return;
+
+        var entity = _teamEntities.Values.FirstOrDefault(a => a.EntityId == move.EntityId);
+
+        if (entity?.Info.MotionInfo is not {} motion)
+            return;
+
+        motion.Pos = incoming.Pos;
+        motion.Rot = incoming.Rot;
+        motion.Speed = incoming.Speed;
+        motion.RefPos = incoming.RefPos;
+        motion.State = incoming.State;
+        motion.SceneTime = incoming.SceneTime;
+    }
+
+    private void HandleBeingHit(Google.Protobuf.ByteString data)
+    {
+        // TODO: Handle EvtBeingHitInfo.
+    }
+
+    private void HandleSetAttackTarget(Google.Protobuf.ByteString data)
+    {
+        // TODO: Handle EvtSetAttackTargetInfo.
+    }
+
+    private void HandleAnimatorParameter(Google.Protobuf.ByteString data)
+    {
+        // TODO: Handle EvtAnimatorParameterInfo.
+    }
+
+    private void HandleBeingHealed(Google.Protobuf.ByteString data)
+    {
+        // TODO: Handle EvtBeingHealedNotify.
+    }
+
+    private void HandleSkillAnchorPosition(Google.Protobuf.ByteString data)
+    {
+        // TODO: Handle EvtSyncSkillAnchorPosition.
+    }
+
+    private static bool TryDecode<T>(Google.Protobuf.ByteString data, out T message)
+        where T : class, ISelfSerializable<T>, new()
+    {
+        message = new T();
+
+        try
+        {
+            using var input = data.CreateCodedInput();
+            T.Serializer.Deserialize(message, input);
+            return true;
+        }
+        catch (Google.Protobuf.InvalidProtocolBufferException)
+        {
+            message = null!;
+            return false;
+        }
     }
 
     [Opcode]
