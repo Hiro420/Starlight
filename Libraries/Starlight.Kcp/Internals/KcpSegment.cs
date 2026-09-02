@@ -39,9 +39,9 @@ public sealed class KcpSegment
         buf.Write32LE(Una);
         buf.Write32LE(Data?.Length ?? 0);
 
-        if (Version.HasExtraHash() && ByteCheckCode.HasValue)
+        if (Version.HasExtraHash())
         {
-            buf.Write32LE(ByteCheckCode.Value);
+            buf.Write32LE(ByteCheckCode ?? 0);
         }
 
         if (Data is { Length: > 0 })
