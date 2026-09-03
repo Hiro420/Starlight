@@ -19,4 +19,4 @@ The next-generation of *a certain anime game*'s reimplementation.
 
 ---
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the AGPL-v3.0 License. See the [LICENSE](LICENSE) file for details.
