@@ -1,3 +1,4 @@
+using Starlight.Game;
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Binary;
 using Starlight.Game.Resources.Excel;
@@ -10,12 +11,13 @@ public sealed class Avatar
     public const uint DefaultFlycloak = 140001;
 
     private const uint Alive = 1;
+    private const uint Dead = 2;
     private const uint AvatarTypeFormal = 1;
 
     private readonly GameData _data;
     private readonly HashSet<uint> _talentIds;
     private readonly Dictionary<uint, uint> _skillLevelMap;
-    private readonly Dictionary<FightProperty, float> _fightProps = [];
+    private readonly FightPropertyStore _fightProps = new();
     private WeaponItem? _equippedWeapon;
 
     private Avatar(GameData data, IEnumerable<uint> talentIds, IReadOnlyDictionary<uint, uint>? skillLevels)
@@ -48,7 +50,8 @@ public sealed class Avatar
     public uint WeaponGadgetId { get; private set; }
     public ulong WeaponGuid { get; private set; }
 
-    public IReadOnlyDictionary<FightProperty, float> FightProps => _fightProps;
+    public IReadOnlyDictionary<uint, float> FightProps => _fightProps;
+    public FightPropertyStore FightPropertyStore => _fightProps;
     public IReadOnlyDictionary<uint, uint> AllSkillLevels => _skillLevelMap;
     public IReadOnlyCollection<uint> AllTalentIds => _talentIds;
 
@@ -118,7 +121,7 @@ public sealed class Avatar
         return true;
     }
 
-    public float GetFightProperty(FightProperty property) => _fightProps.GetValueOrDefault(property);
+    public float GetFightProperty(FightProperty property) => _fightProps.Get(property);
 
     public uint GetSkillLevel(uint skill) => _skillLevelMap.GetValueOrDefault(skill, defaultValue: 1u);
 
@@ -218,7 +221,7 @@ public sealed class Avatar
             AvatarType = AvatarTypeFormal,
             AvatarId = AvatarId,
             Guid = Guid,
-            LifeState = Alive,
+            LifeState = GetFightProperty(FightProperty.FIGHT_PROP_CUR_HP) <= 0f ? Dead : Alive,
             SkillDepotId = SkillDepotId,
             BornTime = BornTime,
             WearingFlycloakId = DefaultFlycloak,
@@ -240,7 +243,7 @@ public sealed class Avatar
 
         foreach (var (property, value) in _fightProps)
         {
-            info.FightPropMap[(uint)property] = value;
+            info.FightPropMap[property] = value;
         }
 
         foreach (var (skill, skillLevel) in GetActiveSkillLevelMap())
@@ -258,30 +261,6 @@ public sealed class Avatar
             info.SkillMap[skill] = new AvatarSkillInfo { MaxChargeCount = charge };
         }
 
-        return info;
-    }
-
-    public SceneAvatarInfo SceneInfo(uint uid, uint peerId, uint weaponEntityId)
-    {
-        var weapon = _equippedWeapon
-                     ?? throw new InvalidOperationException($"Avatar {AvatarId} has no equipped weapon.");
-
-        var sceneWeapon = weapon.ToSceneProtocol();
-        sceneWeapon.EntityId = weaponEntityId;
-
-        var info = new SceneAvatarInfo {
-            Uid = uid,
-            AvatarId = AvatarId,
-            Guid = Guid,
-            PeerId = peerId,
-            SkillDepotId = SkillDepotId,
-            BornTime = BornTime,
-            WearingFlycloakId = DefaultFlycloak,
-            EquipIdList = [weapon.ItemId],
-            Weapon = sceneWeapon
-        };
-
-        PopulateSceneProgression(info);
         return info;
     }
 
@@ -457,9 +436,9 @@ public sealed class Avatar
     }
 
     private void AddFightProperty(FightProperty property, float value) =>
-        _fightProps[property] = GetFightProperty(property) + value;
+        _fightProps.Add(property, value);
 
-    private void SetFightProperty(FightProperty property, float value) => _fightProps[property] = value;
+    private void SetFightProperty(FightProperty property, float value) => _fightProps.Set(property, value);
 
     private FightProperty? GetCurrentEnergyProperty()
     {

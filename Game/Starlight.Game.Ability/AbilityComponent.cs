@@ -1,3 +1,4 @@
+using Starlight.Game;
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Binary;
 
@@ -10,7 +11,7 @@ public sealed class AbilityComponent
     private readonly SortedDictionary<uint, AbilityModifierInstance> _appliedModifiers = [];
     private readonly Dictionary<AbilityKey, AbilityScalarValue> _dynamicValues = [];
     private readonly Dictionary<AbilityKey, AbilityScalarValue> _serverGlobalValues = [];
-    private readonly Dictionary<uint, float> _fightProperties = [];
+    private FightPropertyStore _fightProperties;
     private readonly Dictionary<AbilityKey, Dictionary<AbilityKey, AbilitySpecialAdjustment>> _targetAbilitySpecials = [];
     private readonly HashSet<string> _limitedHpDebtTags = new(StringComparer.Ordinal);
     private readonly HashSet<uint> _hpDebtLimitModifierIds = [];
@@ -18,12 +19,13 @@ public sealed class AbilityComponent
     private uint _lastEmbryoId;
     private uint _lastServerAbilityId;
 
-    public AbilityComponent(AbilityOwner owner)
+    public AbilityComponent(AbilityOwner owner, FightPropertyStore? fightProperties = null)
     {
         if (owner.EntityId == 0)
             throw new ArgumentOutOfRangeException(nameof(owner));
 
         Owner = owner;
+        _fightProperties = fightProperties ?? new FightPropertyStore();
     }
 
     public AbilityOwner Owner { get; private set; }
@@ -36,6 +38,7 @@ public sealed class AbilityComponent
     public IReadOnlyDictionary<AbilityKey, AbilityScalarValue> DynamicValues => _dynamicValues;
     public IReadOnlyDictionary<AbilityKey, AbilityScalarValue> ServerGlobalValues => _serverGlobalValues;
     public IReadOnlyDictionary<uint, float> FightProperties => _fightProperties;
+    public FightPropertyStore FightPropertyStore => _fightProperties;
     public IReadOnlyDictionary<AbilityKey, Dictionary<AbilityKey, AbilitySpecialAdjustment>> TargetAbilitySpecials =>
         _targetAbilitySpecials;
 
@@ -45,6 +48,12 @@ public sealed class AbilityComponent
             throw new ArgumentException("Entity ID cannot change on an existing ability component.", nameof(owner));
 
         Owner = owner;
+    }
+
+    public void BindFightProperties(FightPropertyStore fightProperties)
+    {
+        ArgumentNullException.ThrowIfNull(fightProperties);
+        _fightProperties = fightProperties;
     }
 
     public void ResetEmbryos(IEnumerable<string> abilityNames) =>
@@ -203,9 +212,9 @@ public sealed class AbilityComponent
         return _appliedModifiers.Remove(instancedModifierId);
     }
 
-    public float GetFightProperty(uint property) => _fightProperties.GetValueOrDefault(property);
+    public float GetFightProperty(uint property) => _fightProperties.Get(property);
 
-    public void SetFightProperty(uint property, float value) => _fightProperties[property] = value;
+    public void SetFightProperty(uint property, float value) => _fightProperties.Set(property, value);
 
     internal void SetHpDebtLimit(float ratio, IEnumerable<string> hpDebtTags)
     {
@@ -246,25 +255,11 @@ public sealed class AbilityComponent
         return config.ModifierMixins.Any(mixin => string.Equals(mixin.Type, mixinType, StringComparison.Ordinal));
     }
 
-    public void ReinitializeFightProperties(IEnumerable<KeyValuePair<uint, float>> values)
-    {
-        _fightProperties.Clear();
+    public void ReinitializeFightProperties(IEnumerable<KeyValuePair<uint, float>> values) =>
+        _fightProperties.Replace(values);
 
-        foreach (var (property, value) in values)
-        {
-            _fightProperties[property] = value;
-        }
-    }
-
-    public void ReinitializeFightProperties(IEnumerable<KeyValuePair<FightProperty, float>> values)
-    {
-        _fightProperties.Clear();
-
-        foreach (var (property, value) in values)
-        {
-            _fightProperties[(uint)property] = value;
-        }
-    }
+    public void ReinitializeFightProperties(IEnumerable<KeyValuePair<FightProperty, float>> values) =>
+        _fightProperties.Replace(values);
 
     public void SetDynamicValue(AbilityKey key, AbilityScalarValue value) => _dynamicValues[key] = value;
     public bool ClearDynamicValue(AbilityKey key) => _dynamicValues.Remove(key);

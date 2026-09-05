@@ -1,41 +1,35 @@
+using Starlight.Game;
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Excel;
 using Starlight.Protocol;
 
 namespace Starlight.Game.World;
 
-public sealed class MonsterEntity
+public sealed class MonsterEntity : SceneEntity
 {
-    private readonly Dictionary<FightProperty, float> _fightProps;
-
     private MonsterEntity(
+        Scene scene,
         SceneEntityInfo info,
         MonsterData data,
-        Dictionary<FightProperty, float> fightProps,
+        FightPropertyStore fightProperties,
         uint level,
         uint weaponEntityId,
         uint weaponGadgetId
-    )
+    ) : base(scene, info, fightProperties)
     {
-        Info = info;
         Data = data;
-        _fightProps = fightProps;
         Level = level;
         WeaponEntityId = weaponEntityId;
         WeaponGadgetId = weaponGadgetId;
     }
 
-    public SceneEntityInfo Info { get; }
     public MonsterData Data { get; }
-    public IReadOnlyDictionary<FightProperty, float> FightProps => _fightProps;
-    public uint LastMoveReliableSeq { get; set; }
-    public uint AttackTargetId { get; set; }
     public IReadOnlyList<uint> Affixes => Data.Affixes;
     public IReadOnlyList<uint> Equips => Data.Equips;
-    public uint EntityId => Info.EntityId;
     public uint Level { get; }
     public uint WeaponEntityId { get; }
     public uint WeaponGadgetId { get; }
+    public override uint AuthorityPeerId => Info.Monster?.AuthorityPeerId ?? 0;
 
     public static MonsterEntity Create(
         Scene scene,
@@ -48,6 +42,7 @@ public sealed class MonsterEntity
     {
         var world = scene.World;
         var fightProps = monster.CalculateFightProperties(level, gameData.MonsterCurveData);
+        var fightProperties = new FightPropertyStore(fightProps);
         var weaponGadgetId = gameData.ResolveMonsterWeaponId(monster.Id);
         var weaponEntityId = weaponGadgetId == 0 ? 0 : world.NextEntityId(ProtEntityType.PROT_ENTITY_TYPE_WEAPON);
 
@@ -108,27 +103,14 @@ public sealed class MonsterEntity
             Monster = monsterInfo
         };
 
-        foreach (var (property, value) in fightProps)
-        {
-            info.FightPropList.Add(new FightPropPair { PropType = (uint)property, PropValue = value });
-        }
-
-        return new MonsterEntity(info, monster, fightProps, level, weaponEntityId, weaponGadgetId);
-    }
-
-    public float GetFightProperty(FightProperty property) =>
-        FightProps.GetValueOrDefault(property);
-
-    public void SetFightProperty(FightProperty property, float value)
-    {
-        _fightProps[property] = value;
-
-        var existing = Info.FightPropList.FirstOrDefault(pair => pair.PropType == (uint)property);
-
-        if (existing is null)
-            Info.FightPropList.Add(new FightPropPair { PropType = (uint)property, PropValue = value });
-        else
-            existing.PropValue = value;
+        return new MonsterEntity(
+            scene,
+            info,
+            monster,
+            fightProperties,
+            level,
+            weaponEntityId,
+            weaponGadgetId);
     }
 
     public void SyncAiSkillCooldowns(AiSkillCdInfo info)

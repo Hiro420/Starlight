@@ -4,12 +4,17 @@ using Starlight.Game.Modules;
 using Starlight.Game.Player;
 using Starlight.Game.Resources;
 using Starlight.Protobuf.Core;
+using Starlight.Protobuf.Registry;
 using Starlight.Protocol;
 using Starlight.Rpc.Proto;
 
 namespace Starlight.Game.World;
 
-public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, GameData? data = null) : IModule
+public sealed class SceneModule(
+    IPlayer player,
+    IInvokeForwarder forwarder,
+    ProtocolRegistry protocol,
+    GameData? data = null) : IModule
 {
     #region Beach Simulator
 
@@ -19,7 +24,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
     private const uint SpawnSceneId = 3;
     private static readonly Vector SpawnPosition = new() { X = 2747, Y = 194, Z = -1719 };
 
-    private readonly List<AvatarEntity> _spawned = [];
+    private readonly List<SceneEntityInfo> _spawned = [];
     private readonly Dictionary<ulong, AvatarEntity> _teamEntities = [];
     private ulong _currentAvatarGuid;
 
@@ -82,7 +87,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 var refPos = isIncomingCurrent ? outgoingRef : new Vector();
 
                 entity = AvatarEntity.Create(
-                    module.World,
+                    scene,
                     player.Uid,
                     module.PeerId,
                     avatar,
@@ -99,6 +104,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
             if (entity.Info.MotionInfo is {} standbyMotion)
                 standbyMotion.State = MotionState.MOTION_STATE_STANDBY;
 
+            scene.AddEntity(entity);
             nextEntities.Add(avatar.Guid, entity);
 
             if (!abilities.TryGetComponent(entity.EntityId, out var avatarAbilities))
@@ -109,10 +115,12 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                     avatar.AvatarId,
                     avatar.SkillDepotId,
                     scene.Id,
-                    AbilitySources(avatar, inventory));
+                    AbilitySources(avatar, inventory),
+                    fightProperties: entity.FightProperties);
+            } else
+            {
+                avatarAbilities.BindFightProperties(entity.FightProperties);
             }
-
-            avatarAbilities.ReinitializeFightProperties(avatar.FightProps);
 
             if (!abilities.TryGetComponent(entity.WeaponEntityId, out var weaponAbilities))
             {
@@ -135,7 +143,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 AbilityControlBlock = AbilityProtocol.ToControlBlock(avatarAbilities),
                 AvatarAbilityInfo = AbilityProtocol.ToSyncState(avatarAbilities),
                 WeaponAbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities),
-                SceneEntityInfo = entity.ToProtocol(),
+                SceneEntityInfo = entity.Info,
                 IsOnScene = isCurrent,
                 IsPlayerCurAvatar = isCurrent,
                 AvatarInfo = avatar.Info()
@@ -148,6 +156,15 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
 
         if (current is not null && current.Info.MotionInfo is {} curMotion)
             _lastCurrentMotion = curMotion;
+
+        foreach (var stale in _teamEntities
+                     .Where(pair => !nextEntities.ContainsKey(pair.Key))
+                     .Select(pair => pair.Value)
+                     .ToArray())
+        {
+            scene.RemoveEntity(stale.EntityId);
+            module.World.Abilities.Remove(stale.EntityId);
+        }
 
         _teamEntities.Clear();
 
@@ -173,7 +190,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
             yield return new SceneEntityAppearNotify {
                 AppearType = VisionType.VISION_TYPE_REPLACE,
                 Param = previous.EntityId,
-                EntityList = { current.ToProtocol() }
+                EntityList = { current.Info }
             };
         }
     }
@@ -241,13 +258,20 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         var team = player.Module<TeamModule>().Current;
 
         _spawned.Clear();
+
+        foreach (var existing in _teamEntities.Values)
+        {
+            scene.RemoveEntity(existing.EntityId);
+        }
+
         _teamEntities.Clear();
         _currentAvatarGuid = team.CurrentAvatarGuid;
         _lastCurrentMotion = null;
 
         foreach (var avatar in team.Avatars)
         {
-            var entity = AvatarEntity.Create(world, player.Uid, module.PeerId, avatar, SpawnPosition);
+            var entity = AvatarEntity.Create(scene, player.Uid, module.PeerId, avatar, SpawnPosition);
+            scene.AddEntity(entity);
             _teamEntities.Add(avatar.Guid, entity);
 
             var avatarAbilities = abilities.RegisterAvatar(
@@ -256,8 +280,8 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 avatar.AvatarId,
                 avatar.SkillDepotId,
                 scene.Id,
-                AbilitySources(avatar, inventory));
-            avatarAbilities.ReinitializeFightProperties(avatar.FightProps);
+                AbilitySources(avatar, inventory),
+                fightProperties: entity.FightProperties);
 
             var weaponAbilities = abilities.RegisterWeapon(
                 world.Abilities,
@@ -270,7 +294,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
             if (isCurrent)
             {
                 enterInfo.CurAvatarEntityId = entity.EntityId;
-                _spawned.Add(entity);
+                _spawned.Add(entity.Info);
                 _lastCurrentMotion = entity.Info.MotionInfo;
             }
 
@@ -293,7 +317,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 AbilityControlBlock = AbilityProtocol.ToControlBlock(avatarAbilities),
                 AvatarAbilityInfo = AbilityProtocol.ToSyncState(avatarAbilities),
                 WeaponAbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities),
-                SceneEntityInfo = entity.ToProtocol(),
+                SceneEntityInfo = entity.Info,
                 IsOnScene = isCurrent,
                 IsPlayerCurAvatar = isCurrent
             });
@@ -310,7 +334,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         // TODO: Validate `enter_scene_token`.
 
         var scene = player.Module<WorldModule>().Scene;
-        var entities = _spawned.Select(entity => entity.ToProtocol());
+        IEnumerable<SceneEntityInfo> entities = _spawned;
 
         if (scene is not null)
             entities = entities.Concat(scene.Monsters.Values.Select(monster => monster.Info));
@@ -326,6 +350,8 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
     [Opcode]
     public async Task OnCombatInvocations(CombatInvocationsNotify notify)
     {
+        var pendingHits = new List<AttackResult>();
+
         foreach (var invoke in notify.InvokeList)
         {
             switch (invoke.ArgumentType)
@@ -334,7 +360,8 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                     HandleEntityMove(invoke.CombatData);
                     break;
                 case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_EVT_BEING_HIT:
-                    HandleBeingHit(invoke.CombatData);
+                    if (TryDecode(invoke.CombatData, out EvtBeingHitInfo hit) && hit.AttackResult is not null)
+                        pendingHits.Add(hit.AttackResult);
                     break;
                 case CombatTypeArgument.COMBAT_TYPE_ARGUMENT_SET_ATTACK_TARGET:
                     HandleSetAttackTarget(invoke.CombatData);
@@ -364,33 +391,19 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 new CombatInvocationsNotify { InvokeList = [.. group] },
                 forwardPeer: 0);
         }
+
+        foreach (var attack in pendingHits)
+        {
+            await HandleAttack(attack);
+        }
     }
 
     private void HandleEntityMove(Google.Protobuf.ByteString data)
     {
-        if (!TryDecode(data, out EntityMoveInfo move) || move.MotionInfo is not {} incoming)
+        if (!TryDecode(data, out EntityMoveInfo move))
             return;
 
-        var avatar = _teamEntities.Values.FirstOrDefault(entity => entity.EntityId == move.EntityId);
-        var motion = avatar?.Info.MotionInfo;
-
-        if (motion is null)
-        {
-            var scene = player.Module<WorldModule>().Scene;
-
-            if (scene is not null && scene.Monsters.TryGetValue(move.EntityId, out var monster))
-                motion = monster.Info.MotionInfo;
-        }
-
-        if (motion is null)
-            return;
-
-        motion.Pos = incoming.Pos;
-        motion.Rot = incoming.Rot;
-        motion.Speed = incoming.Speed;
-        motion.RefPos = incoming.RefPos;
-        motion.State = incoming.State;
-        motion.SceneTime = incoming.SceneTime;
+        TryApplyEntityMove(move, requireAuthority: true, out _);
     }
 
     private IEnumerable<IMessage> SwitchAvatar(PlayerTeam team, AvatarSwitchContext avatarSwitch)
@@ -428,21 +441,323 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         yield return new SceneEntityAppearNotify {
             AppearType = VisionType.VISION_TYPE_REPLACE,
             Param = previous.EntityId,
-            EntityList = { current.ToProtocol() }
+            EntityList = { current.Info }
         };
     }
 
     private static Vector CopyVector(Vector? source) =>
         source is null ? new Vector() : new Vector { X = source.X, Y = source.Y, Z = source.Z };
 
-    private void HandleBeingHit(Google.Protobuf.ByteString data)
-    {
-        // TODO: Handle EvtBeingHitInfo.
-    }
-
     private void HandleSetAttackTarget(Google.Protobuf.ByteString data)
     {
-        // TODO: Handle EvtSetAttackTargetInfo.
+        if (!TryDecode(data, out EvtSetAttackTargetInfo target))
+            return;
+
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null || !scene.TryGetEntity(target.EntityId, out var entity))
+            return;
+
+        // Attack-target state lives on GameEntity in Grasscutter. Keep it generic here too;
+        // authority still has to belong to the peer sending the invoke.
+        if (entity.AuthorityPeerId != 0 && entity.AuthorityPeerId != module.PeerId)
+            return;
+
+        entity.AttackTargetId = target.AttackTargetId;
+    }
+
+    [Opcode]
+    public async Task OnSceneEntityMove(SceneEntityMoveReq msg)
+    {
+        var move = new EntityMoveInfo {
+            EntityId = msg.EntityId,
+            MotionInfo = msg.MotionInfo,
+            SceneTime = msg.SceneTime,
+            ReliableSeq = msg.ReliableSeq,
+            IsReliable = msg.ReliableSeq != 0
+        };
+
+        if (!TryApplyEntityMove(move, requireAuthority: true, out var currentMotion))
+        {
+            await player.Send(new SceneEntityMoveRsp {
+                EntityId = msg.EntityId,
+                SceneTime = msg.SceneTime,
+                ReliableSeq = msg.ReliableSeq,
+                Retcode = -1,
+                FailMotion = currentMotion
+            });
+            return;
+        }
+
+        await BroadcastSceneExceptPlayer(new SceneEntityMoveNotify {
+            EntityId = msg.EntityId,
+            SceneTime = msg.SceneTime,
+            ReliableSeq = msg.ReliableSeq,
+            MotionInfo = CopyMotion(msg.MotionInfo)
+        });
+    }
+
+    [Opcode]
+    public async Task<SceneEntitiesMovesRsp> OnSceneEntitiesMoves(SceneEntitiesMovesReq msg)
+    {
+        var response = new SceneEntitiesMovesRsp();
+        var accepted = new List<EntityMoveInfo>();
+
+        foreach (var move in msg.EntityMoveInfoList)
+        {
+            if (TryApplyEntityMove(move, requireAuthority: true, out var currentMotion))
+            {
+                accepted.Add(move);
+                continue;
+            }
+
+            response.EntityMoveFailInfoList.Add(new EntityMoveFailInfo {
+                EntityId = move.EntityId,
+                SceneTime = move.SceneTime,
+                ReliableSeq = move.ReliableSeq,
+                Retcode = -1,
+                FailMotion = currentMotion
+            });
+        }
+
+        foreach (var move in accepted)
+        {
+            await BroadcastSceneExceptPlayer(new SceneEntityMoveNotify {
+                EntityId = move.EntityId,
+                SceneTime = move.SceneTime,
+                ReliableSeq = move.ReliableSeq,
+                MotionInfo = CopyMotion(move.MotionInfo)
+            });
+        }
+
+        return response;
+    }
+
+    [Opcode]
+    public void OnEvtAiSyncSkillCd(EvtAiSyncSkillCdNotify notify)
+    {
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null || module.PeerId != module.World.HostPeerId)
+            return;
+
+        foreach (var (entityId, cdInfo) in notify.AiCdMap)
+        {
+            if (scene.Monsters.TryGetValue(entityId, out var monster))
+                monster.SyncAiSkillCooldowns(cdInfo);
+        }
+    }
+
+    [Opcode]
+    public void OnEvtAiSyncCombatThreat(EvtAiSyncCombatThreatInfoNotify notify)
+    {
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null || module.PeerId != module.World.HostPeerId)
+            return;
+
+        foreach (var (entityId, threatInfo) in notify.CombatThreatInfoMap)
+        {
+            if (scene.Monsters.TryGetValue(entityId, out var monster))
+                monster.SyncAiThreat(threatInfo);
+        }
+    }
+
+    [Opcode]
+    public void OnMonsterAlertChange(MonsterAlertChangeNotify notify)
+    {
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null || module.PeerId != module.World.HostPeerId)
+            return;
+
+        var alert = notify.IsAlert != 0;
+
+        foreach (var entityId in notify.MonsterEntityList)
+        {
+            if (!scene.Monsters.TryGetValue(entityId, out var monster))
+                continue;
+
+            monster.SetAlert(alert);
+
+            if (alert && notify.AvatarEntityId != 0)
+                monster.AttackTargetId = notify.AvatarEntityId;
+            else if (!alert)
+                monster.AttackTargetId = 0;
+        }
+    }
+
+    private async Task HandleAttack(AttackResult attack)
+    {
+        var scene = player.Module<WorldModule>().Scene;
+
+        if (scene is null)
+            return;
+
+        var result = scene.HandleAttack(attack);
+
+        if (!result.Handled || result.Target is not {} target)
+            return;
+
+        var damage = result.Damage;
+
+        await BroadcastScene(new EntityFightPropUpdateNotify {
+            EntityId = target.EntityId,
+            FightPropMap = {
+                [(uint)FightProperty.FIGHT_PROP_CUR_HP] = damage.CurrentHp
+            }
+        });
+
+        if (damage.ClearedHpDebt != 0f)
+        {
+            await BroadcastScene(new EntityFightPropUpdateNotify {
+                EntityId = target.EntityId,
+                FightPropMap = {
+                    [(uint)FightProperty.FIGHT_PROP_CUR_HP_DEBTS] = 0f
+                }
+            });
+        }
+
+        if (damage.Died)
+            await KillEntity(scene, target, result.AttackerId);
+    }
+
+    private async Task KillEntity(Scene scene, SceneEntity target, uint sourceEntityId)
+    {
+        // Damage() already transitions the entity to dead. Keep this method usable by
+        // future non-damage kill paths as well.
+        target.Info.LifeState = 2;
+
+        if (scene.World.Abilities.TryGet(target.EntityId, out var component))
+            component.SetKilled(true);
+
+        await BroadcastScene(new LifeStateChangeNotify {
+            EntityId = target.EntityId,
+            LifeState = 2,
+            SourceEntityId = sourceEntityId,
+            MoveReliableSeq = target.LastMoveReliableSeq
+        });
+
+        target.OnDeath(sourceEntityId);
+
+        // Grasscutter keeps dead avatars registered and removes non-avatar entities.
+        if (!target.RemoveFromSceneOnDeath)
+            return;
+
+        await BroadcastScene(new SceneEntityDisappearNotify {
+            DisappearType = VisionType.VISION_TYPE_DIE,
+            EntityList = { target.EntityId }
+        });
+
+        scene.RemoveEntity(target.EntityId);
+        scene.World.Abilities.Remove(target.EntityId);
+
+        if (target is MonsterEntity { WeaponEntityId: not 0 } monster)
+            scene.World.Abilities.Remove(monster.WeaponEntityId);
+    }
+
+    private bool TryApplyEntityMove(EntityMoveInfo move, bool requireAuthority, out MotionInfo currentMotion)
+    {
+        currentMotion = new MotionInfo();
+
+        if (move.EntityId == 0 || move.MotionInfo is not {} incoming)
+            return false;
+
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null || !scene.TryGetEntity(move.EntityId, out var entity) ||
+            entity.MotionInfo is not {} motion)
+            return false;
+
+        currentMotion = CopyMotion(motion);
+
+        if (requireAuthority && entity.AuthorityPeerId != 0 && entity.AuthorityPeerId != module.PeerId)
+            return false;
+
+        CopyMotionInto(motion, incoming);
+        entity.LastMoveReliableSeq = move.ReliableSeq;
+        entity.LastMoveSceneTimeMs = move.SceneTime;
+        currentMotion = CopyMotion(motion);
+
+        if (entity is AvatarEntity avatar && avatar.EntityId == _teamEntities.GetValueOrDefault(_currentAvatarGuid)?.EntityId)
+            _lastCurrentMotion = motion;
+
+        return true;
+    }
+
+    private Task BroadcastScene(IMessage message)
+    {
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null)
+            return Task.CompletedTask;
+
+        return Task.WhenAll(
+            module.World.Peers.Values
+                .Where(peer => peer.Module<WorldModule>().Scene?.Id == scene.Id)
+                .Select(peer => peer.Send(message)));
+    }
+
+    private Task BroadcastSceneExceptPlayer(IMessage message)
+    {
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene;
+
+        if (scene is null)
+            return Task.CompletedTask;
+
+        return Task.WhenAll(
+            module.World.Peers.Values
+                .Where(peer => !ReferenceEquals(peer, player) && peer.Module<WorldModule>().Scene?.Id == scene.Id)
+                .Select(peer => peer.Send(message)));
+    }
+
+    private static MotionInfo CopyMotion(MotionInfo? source)
+    {
+        if (source is null)
+            return new MotionInfo();
+
+        var copy = new MotionInfo {
+            Pos = CopyVector(source.Pos),
+            Rot = CopyVector(source.Rot),
+            Speed = CopyVector(source.Speed),
+            RefPos = CopyVector(source.RefPos),
+            RefId = source.RefId,
+            State = source.State,
+            SceneTime = source.SceneTime,
+            IntervalVelocity = source.IntervalVelocity
+        };
+
+        foreach (var param in source.Params)
+        {
+            copy.Params.Add(CopyVector(param));
+        }
+
+        return copy;
+    }
+
+    private static void CopyMotionInto(MotionInfo target, MotionInfo source)
+    {
+        target.Pos = CopyVector(source.Pos);
+        target.Rot = CopyVector(source.Rot);
+        target.Speed = CopyVector(source.Speed);
+        target.RefPos = CopyVector(source.RefPos);
+        target.RefId = source.RefId;
+        target.State = source.State;
+        target.SceneTime = source.SceneTime;
+        target.IntervalVelocity = source.IntervalVelocity;
+        target.Params.Clear();
+
+        foreach (var param in source.Params)
+        {
+            target.Params.Add(CopyVector(param));
+        }
     }
 
     private void HandleAnimatorParameter(Google.Protobuf.ByteString data)
@@ -460,7 +775,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         // TODO: Handle EvtSyncSkillAnchorPosition.
     }
 
-    private static bool TryDecode<T>(Google.Protobuf.ByteString data, out T message)
+    private bool TryDecode<T>(Google.Protobuf.ByteString data, out T message)
         where T : class, ISelfSerializable<T>, new()
     {
         message = new T();
@@ -468,10 +783,15 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         try
         {
             using var input = data.CreateCodedInput();
-            T.Serializer.Deserialize(message, input);
+
+            if (protocol.GetDescriptor(typeof(T)) is not null)
+                protocol.Deserialize(message, input);
+            else
+                T.Serializer.Deserialize(message, input);
+
             return true;
         }
-        catch (Google.Protobuf.InvalidProtocolBufferException)
+        catch (Exception)
         {
             message = null!;
             return false;
@@ -506,9 +826,8 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
             module.World.Abilities,
             new AbilityOwner(entity.EntityId, AbilityOwnerType.Monster, module.World.HostPeerId),
             monsterId,
-            scene.Id);
-
-        monsterAbilities.ReinitializeFightProperties(entity.FightProps);
+            scene.Id,
+            fightProperties: entity.FightProperties);
         entity.Info.EntityAuthorityInfo!.AbilityInfo = AbilityProtocol.ToSyncState(monsterAbilities);
 
         if (entity.WeaponEntityId != 0 && entity.WeaponGadgetId != 0)
@@ -522,7 +841,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 entity.Info.Monster.WeaponList[0].AbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities);
         }
 
-        scene.AddMonster(entity);
+        scene.AddEntity(entity);
 
         var notification = new SceneEntityAppearNotify {
             AppearType = VisionType.VISION_TYPE_BORN,
@@ -536,13 +855,6 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         await Task.WhenAll(recipients);
         return entity;
     }
-
-    [Opcode]
-    public QueryPathRsp OnQueryPath(QueryPathReq msg) => new() {
-        QueryId = msg.QueryId,
-        QueryStatus = QueryPathRsp.Types.PathStatusType.PATH_STATUS_TYPE_SUCC,
-        Corners = msg.DestinationPos.Prepend(msg.SourcePos ?? new Vector()).ToList()
-    };
 
     [Opcode]
     public PostEnterSceneRsp OnPostEnterScene(PostEnterSceneReq msg) =>

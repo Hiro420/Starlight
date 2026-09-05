@@ -549,7 +549,7 @@ public sealed class AvatarEquipTests
 
         foreach (var (property, value) in first.FightProps)
         {
-            Assert.True(appearedFightProps.TryGetValue(property, out var actual));
+            Assert.True(appearedFightProps.TryGetValue((FightProperty)property, out var actual));
             Assert.Equal(value, actual);
         }
     }
@@ -807,7 +807,7 @@ public sealed class AvatarEquipTests
                     forwarder: router));
 
             registry.AddModule<SceneModule>((_, player) =>
-                new SceneModule(player, router));
+                new SceneModule(player, router, protocol));
         }
 
         registry.Build();

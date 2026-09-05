@@ -1,3 +1,4 @@
+using Starlight.Game;
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Binary;
 using System.Globalization;
@@ -103,10 +104,11 @@ public sealed class AbilityInitializer(GameData data)
         uint sceneId,
         AvatarAbilitySources? sources = null,
         IEnumerable<AbilityEmbryoSeed>? additional = null,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     )
     {
-        var component = scope.Register(owner);
+        var component = scope.Register(owner, fightProperties: fightProperties);
         component.ResetServerAbilities();
         component.ClearTargetAbilitySpecials();
 
@@ -224,7 +226,8 @@ public sealed class AbilityInitializer(GameData data)
         IEnumerable<uint>? groupAffixes = null,
         bool isElite = false,
         bool isLightConfig = false,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     )
     {
         data.MonsterData.TryGetValue(monsterId, out var monster);
@@ -232,7 +235,7 @@ public sealed class AbilityInitializer(GameData data)
         if (monster?.SecurityLevel == "BOSS" && owner.ClientInitInvokeLimit == 0)
             owner = owner with { ClientInitInvokeLimit = 200 };
 
-        var component = scope.Register(owner);
+        var component = scope.Register(owner, fightProperties: fightProperties);
         component.ResetEmbryos(new List<string>());
         component.ClearTargetAbilitySpecials();
 

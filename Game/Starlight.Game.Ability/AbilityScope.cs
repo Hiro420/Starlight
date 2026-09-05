@@ -1,3 +1,5 @@
+using Starlight.Game;
+
 namespace Starlight.Game.Ability;
 
 public static class AbilityEntityIds
@@ -13,18 +15,25 @@ public sealed class AbilityScope
     public IReadOnlyDictionary<uint, AbilityComponent> Components => _components;
     public IReadOnlyDictionary<uint, AbilityComponent> SceneComponents => _sceneComponents;
 
-    public AbilityComponent Register(AbilityOwner owner, IEnumerable<string>? embryos = null)
+    public AbilityComponent Register(
+        AbilityOwner owner,
+        IEnumerable<string>? embryos = null,
+        FightPropertyStore? fightProperties = null
+    )
     {
         if (_components.TryGetValue(owner.EntityId, out var existing))
         {
             existing.UpdateOwner(owner);
+
+            if (fightProperties is not null && !ReferenceEquals(existing.FightPropertyStore, fightProperties))
+                existing.BindFightProperties(fightProperties);
 
             if (embryos is not null && existing.Embryos.Count == 0)
                 existing.ResetEmbryos(embryos);
             return existing;
         }
 
-        var component = Create(owner, embryos);
+        var component = Create(owner, embryos, fightProperties);
         _components[owner.EntityId] = component;
         return component;
     }
@@ -48,10 +57,14 @@ public sealed class AbilityScope
         return component;
     }
 
-    public AbilityComponent Replace(AbilityOwner owner, IEnumerable<string>? embryos = null)
+    public AbilityComponent Replace(
+        AbilityOwner owner,
+        IEnumerable<string>? embryos = null,
+        FightPropertyStore? fightProperties = null
+    )
     {
         _components.Remove(owner.EntityId);
-        return Register(owner, embryos);
+        return Register(owner, embryos, fightProperties);
     }
 
     public AbilityComponent ReplaceScene(uint sceneId, AbilityOwner owner, IEnumerable<string>? embryos = null)
@@ -105,9 +118,13 @@ public sealed class AbilityScope
         _sceneComponents.Clear();
     }
 
-    private static AbilityComponent Create(AbilityOwner owner, IEnumerable<string>? embryos)
+    private static AbilityComponent Create(
+        AbilityOwner owner,
+        IEnumerable<string>? embryos,
+        FightPropertyStore? fightProperties = null
+    )
     {
-        var component = new AbilityComponent(owner);
+        var component = new AbilityComponent(owner, fightProperties);
 
         if (embryos is not null)
             component.ResetEmbryos(embryos);

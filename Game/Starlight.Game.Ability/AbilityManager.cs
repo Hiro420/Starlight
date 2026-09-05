@@ -1,4 +1,5 @@
 using Google.Protobuf;
+using Starlight.Game;
 using Starlight.Game.Ability.Handlers;
 using Starlight.Game.Modules;
 using Starlight.Game.Player;
@@ -54,10 +55,11 @@ public sealed class AbilityModule(
         uint sceneId,
         AvatarAbilitySources? sources = null,
         IEnumerable<AbilityEmbryoSeed>? additional = null,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     ) =>
         initializer.RegisterAvatar(
-            scope, owner, avatarId, skillDepotId, sceneId, sources, additional, additionalLevelConfigs);
+            scope, owner, avatarId, skillDepotId, sceneId, sources, additional, additionalLevelConfigs, fightProperties);
 
     public AbilityComponent RegisterWeapon(AbilityScope scope, AbilityOwner owner, uint gadgetId) =>
         initializer.RegisterWeapon(scope, owner, gadgetId);
@@ -76,10 +78,11 @@ public sealed class AbilityModule(
         IEnumerable<uint>? groupAffixes = null,
         bool isElite = false,
         bool isLightConfig = false,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     ) =>
         initializer.RegisterMonster(
-            scope, owner, monsterId, sceneId, groupAffixes, isElite, isLightConfig, additionalLevelConfigs);
+            scope, owner, monsterId, sceneId, groupAffixes, isElite, isLightConfig, additionalLevelConfigs, fightProperties);
 
     public void Append(AbilityComponent component, IEnumerable<AbilityEmbryoSeed> abilities) =>
         initializer.Append(component, abilities);
