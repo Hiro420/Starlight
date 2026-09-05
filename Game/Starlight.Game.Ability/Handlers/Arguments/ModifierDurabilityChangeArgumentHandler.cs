@@ -12,14 +12,18 @@ public sealed class ModifierDurabilityChangeArgumentHandler(ProtocolRegistry pro
     {
         var head = context.Invoke.Head ?? new AbilityInvokeEntryHead();
 
-        if (!context.Source.TryGetModifier(head.InstancedModifierId, out var modifier) ||
-            !AbilityInvokeDecode.Try<AbilityMetaModifierDurabilityChange>(protocol, context.Invoke.AbilityData,
+        if (!AbilityInvokeDecode.Try<AbilityMetaModifierDurabilityChange>(protocol, context.Invoke.AbilityData,
                 out var change))
         {
             if (context.LogAbilitiesEnabled)
                 Log.Warning("Failed to decode AbilityMetaModifierDurabilityChange for modifier {@ModifierId}\n{@AbilityData}",
                     head.InstancedModifierId, context.Invoke.AbilityData);
             return ValueTask.FromException(new InvalidOperationException("Invalid ability data"));
+        }
+
+        if (!context.Source.TryGetModifier(head.InstancedModifierId, out var modifier))
+        {
+            return ValueTask.CompletedTask;
         }
 
         modifier.HasDurability = true;
