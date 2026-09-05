@@ -136,7 +136,8 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder) : IM
                 WeaponAbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities),
                 SceneEntityInfo = entity.Info,
                 IsOnScene = isCurrent,
-                IsPlayerCurAvatar = isCurrent
+                IsPlayerCurAvatar = isCurrent,
+                AvatarInfo = avatar.Info()
             });
         }
 

@@ -68,6 +68,8 @@ internal static class Program
     /// <param name="args">Command line arguments.</param>
     private static async Task<int> Main(string[] args)
     {
+        using var interactiveConsole = new InteractiveConsole();
+
         Log.Logger = new LoggerConfiguration()
             .Enrich.FromLogContext()
             .MinimumLevel.ControlledBy(LogLevel)
@@ -122,6 +124,7 @@ internal static class Program
                 // The server services use these to operate.
                 .Services
                 .AddSerilog()
+                .AddSingleton(interactiveConsole)
                 .AddCommands()
                 .AddSingleton<GameData>()
                 .AddSingleton<ProtocolRegistry>(protocol)

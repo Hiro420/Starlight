@@ -5,6 +5,7 @@ namespace Starlight.Console;
 
 public sealed class ConsoleService(
     CommandRegistry registry,
+    InteractiveConsole console,
     IHostApplicationLifetime lifetime
 ) : BackgroundService
 {
@@ -17,7 +18,7 @@ public sealed class ConsoleService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var input = await ReadLineAsync(stoppingToken);
+            var input = await console.ReadLineAsync(stoppingToken);
 
             // Cancellation requested (shutdown) or end of input stream.
             if (input is null)
@@ -45,26 +46,5 @@ public sealed class ConsoleService(
                 Log.Error(ex, "Command failed: {Command}", name);
             }
         }
-    }
-
-    /// <summary>
-    /// Reads a line from the console without leaving graceful shutdown blocked.
-    /// <see cref="System.Console.In"/> ignores cancellation once the underlying
-    /// blocking read has started, so the read runs on a separate thread and is
-    /// abandoned when cancellation is requested.
-    /// </summary>
-    private static async Task<string?> ReadLineAsync(CancellationToken cancellationToken)
-    {
-        var readTask = Task.Run(System.Console.ReadLine, CancellationToken.None);
-
-        var cancelled = new TaskCompletionSource();
-
-        await using (cancellationToken.Register(() => cancelled.TrySetResult()))
-        {
-            if (await Task.WhenAny(readTask, cancelled.Task) != readTask)
-                return null;
-        }
-
-        return await readTask;
     }
 }
