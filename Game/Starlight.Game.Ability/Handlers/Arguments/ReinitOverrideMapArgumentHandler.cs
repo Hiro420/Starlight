@@ -11,13 +11,20 @@ public sealed class ReinitOverrideMapArgumentHandler(ProtocolRegistry protocol)
     {
         var head = context.Invoke.Head ?? new AbilityInvokeEntryHead();
 
-        if (!context.Source.TryGetAbility(head.InstancedAbilityId, out var ability) ||
-            !AbilityInvokeDecode.Try<AbilityMetaReInitOverrideMap>(protocol, context.Invoke.AbilityData, out var reinit))
+        if (!AbilityInvokeDecode.Try<AbilityMetaReInitOverrideMap>(protocol, context.Invoke.AbilityData, out var reinit))
         {
             if (context.LogAbilitiesEnabled)
                 Log.Warning("ReinitOverrideMapArgumentHandler: Failed to decode ability meta reinit override map {@AbilityData}",
                     context.Invoke.AbilityData.ToBase64());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Failed to decode ability meta reinit override map"));
+        }
+
+        if (!context.Source.TryGetAbility(head.InstancedAbilityId, out var ability))
+        {
+            //if (context.LogAbilitiesEnabled)
+            //    Log.Warning("ReinitOverrideMapArgumentHandler: Failed to get ability {@AbilityData}",
+            //    context.Invoke.AbilityData.ToBase64());
+            return ValueTask.FromException(new InvalidOperationException("Failed to get ability"));
         }
 
         ability.ReinitializeOverrides(reinit.OverrideMap

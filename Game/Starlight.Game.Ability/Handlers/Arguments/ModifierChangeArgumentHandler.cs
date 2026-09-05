@@ -22,7 +22,7 @@ public sealed class ModifierChangeArgumentHandler(
         {
             if (context.LogAbilitiesEnabled)
                 Log.Warning("ModifierChangeArgumentHandler: Invalid ability data {@AbilityData}", context.Invoke.AbilityData.ToBase64());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Invalid ability data"));
         }
 
         if (change.Action == ModifierAction.MODIFIER_ACTION_REMOVED)
@@ -39,7 +39,7 @@ public sealed class ModifierChangeArgumentHandler(
             if (context.LogAbilitiesEnabled)
                 Log.Warning("ModifierChangeArgumentHandler: Invalid modifier change action {@AbilityData} (no parent ability id)",
                     context.Invoke.AbilityData.ToBase64());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Invalid modifier change action (no parent ability id)"));
         }
 
         var parentComponent = context.Source;
@@ -105,7 +105,7 @@ public sealed class ModifierChangeArgumentHandler(
 
         context.Source.UpsertModifier(modifier);
         hpDebts.OnModifierAdded(context, context.Source, modifier, parentAbility);
-        return ValueTask.CompletedTask;
+        return ValueTask.FromException(new InvalidOperationException("Invalid ability data"));
     }
 
     private static Resources.Binary.AbilityConfig? ResolveAbility(GameData data, AbilityKey key) =>
