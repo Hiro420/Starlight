@@ -14,7 +14,8 @@ public sealed class SceneModule(
     IPlayer player,
     IInvokeForwarder forwarder,
     ProtocolRegistry protocol,
-    GameData? data = null) : IModule
+    GameData? data = null
+) : IModule
 {
     #region Beach Simulator
 
