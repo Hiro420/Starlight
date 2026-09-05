@@ -105,7 +105,7 @@ public sealed class ModifierChangeArgumentHandler(
 
         context.Source.UpsertModifier(modifier);
         hpDebts.OnModifierAdded(context, context.Source, modifier, parentAbility);
-        return ValueTask.FromException(new InvalidOperationException("Invalid ability data"));
+        return ValueTask.CompletedTask;
     }
 
     private static Resources.Binary.AbilityConfig? ResolveAbility(GameData data, AbilityKey key) =>
