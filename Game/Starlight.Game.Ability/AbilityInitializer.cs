@@ -138,7 +138,7 @@ public sealed class AbilityInitializer(GameData data)
                 if (!data.AvatarTalentData.TryGetValue(talentId, out var talent) || string.IsNullOrEmpty(talent.ConfigName))
                     continue;
 
-                ApplyTalent(component, seeds, data.ResolveTalent(talent.ConfigName), []);
+                ApplyTalent(component, seeds, data.ResolveTalent(talent.ConfigName), talent.ParamList);
             }
 
             if (depot is not null)

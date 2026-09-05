@@ -144,6 +144,9 @@ public sealed class AvatarTalentData : Data
 
     [JsonPropertyName("openConfig")]
     public string ConfigName { get; set; } = string.Empty;
+
+    [JsonPropertyName("paramList")]
+    public List<float> ParamList { get; set; } = [];
 }
 
 public sealed class InherentProudSkillOpenData
