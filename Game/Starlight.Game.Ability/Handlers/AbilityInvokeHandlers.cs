@@ -1,3 +1,4 @@
+using Serilog;
 using Starlight.Protocol;
 
 namespace Starlight.Game.Ability.Handlers;
@@ -131,15 +132,52 @@ public sealed class AbilityInvokeHandlerRegistry
     public async ValueTask DispatchAsync(AbilityContext context)
     {
         if (_arguments.TryGetValue(context.Invoke.ArgumentType, out var argumentHandlers))
+        {
             await Execute(argumentHandlers, context);
+        } else
+        {
+            if (context.LogAbilitiesEnabled)
+            {
+                Log.Warning(
+                    "Unhandled ability argument: {ArgumentType}",
+                    context.Invoke.ArgumentType
+                );
+            }
+        }
 
-        if (context.Action is { Type.Length: > 0 } action &&
-            _actions.TryGetValue(action.Type, out var actionHandlers))
-            await Execute(actionHandlers, context);
+        if (context.Action is { Type.Length: > 0 } action)
+        {
+            if (_actions.TryGetValue(action.Type, out var actionHandlers))
+            {
+                await Execute(actionHandlers, context);
+            } else
+            {
+                if (context.LogAbilitiesEnabled)
+                {
+                    Log.Warning(
+                        "Unhandled ability action: {ActionType}",
+                        action.Type
+                    );
+                }
+            }
+        }
 
-        if (context.Mixin is { Type.Length: > 0 } mixin &&
-            _mixins.TryGetValue(mixin.Type, out var mixinHandlers))
-            await Execute(mixinHandlers, context);
+        if (context.Mixin is { Type.Length: > 0 } mixin)
+        {
+            if (_mixins.TryGetValue(mixin.Type, out var mixinHandlers))
+            {
+                await Execute(mixinHandlers, context);
+            } else
+            {
+                if (context.LogAbilitiesEnabled)
+                {
+                    Log.Warning(
+                        "Unhandled ability mixin: {MixinType}",
+                        mixin.Type
+                    );
+                }
+            }
+        }
     }
 
     private static async ValueTask Execute(
@@ -149,7 +187,17 @@ public sealed class AbilityInvokeHandlerRegistry
     {
         foreach (var handler in handlers)
         {
-            await handler.HandleAsync(context);
+            try
+            {
+                await handler.HandleAsync(context);
+            }
+            catch (Exception ex)
+            {
+                if (context.LogAbilitiesEnabled)
+                {
+                    Log.Error(ex, "An error occurred while executing ability invoke handler {HandlerType}.", handler.GetType().FullName);
+                }
+            }
         }
     }
 }
