@@ -538,6 +538,13 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
     }
 
     [Opcode]
+    public QueryPathRsp OnQueryPath(QueryPathReq msg) => new() {
+        QueryId = msg.QueryId,
+        QueryStatus = QueryPathRsp.Types.PathStatusType.PATH_STATUS_TYPE_SUCC,
+        Corners = msg.DestinationPos.Prepend(msg.SourcePos ?? new Vector()).ToList()
+    };
+
+    [Opcode]
     public PostEnterSceneRsp OnPostEnterScene(PostEnterSceneReq msg) =>
         // TODO: Validate `enter_scene_token`.
         new() { EnterSceneToken = msg.EnterSceneToken };
