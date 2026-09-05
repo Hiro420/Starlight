@@ -12,4 +12,6 @@ public sealed class Scene(World world, uint sceneId)
     public IReadOnlyDictionary<uint, MonsterEntity> Monsters => _monsters;
 
     public void AddMonster(MonsterEntity monster) => _monsters[monster.EntityId] = monster;
+
+    public bool RemoveMonster(uint entityId) => _monsters.Remove(entityId);
 }

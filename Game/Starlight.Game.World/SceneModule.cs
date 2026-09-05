@@ -19,7 +19,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
     private const uint SpawnSceneId = 3;
     private static readonly Vector SpawnPosition = new() { X = 2747, Y = 194, Z = -1719 };
 
-    private readonly List<SceneEntityInfo> _spawned = [];
+    private readonly List<AvatarEntity> _spawned = [];
     private readonly Dictionary<ulong, AvatarEntity> _teamEntities = [];
     private ulong _currentAvatarGuid;
 
@@ -135,7 +135,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 AbilityControlBlock = AbilityProtocol.ToControlBlock(avatarAbilities),
                 AvatarAbilityInfo = AbilityProtocol.ToSyncState(avatarAbilities),
                 WeaponAbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities),
-                SceneEntityInfo = entity.Info,
+                SceneEntityInfo = entity.ToProtocol(),
                 IsOnScene = isCurrent,
                 IsPlayerCurAvatar = isCurrent,
                 AvatarInfo = avatar.Info()
@@ -173,7 +173,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
             yield return new SceneEntityAppearNotify {
                 AppearType = VisionType.VISION_TYPE_REPLACE,
                 Param = previous.EntityId,
-                EntityList = { current.Info }
+                EntityList = { current.ToProtocol() }
             };
         }
     }
@@ -270,7 +270,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
             if (isCurrent)
             {
                 enterInfo.CurAvatarEntityId = entity.EntityId;
-                _spawned.Add(entity.Info);
+                _spawned.Add(entity);
                 _lastCurrentMotion = entity.Info.MotionInfo;
             }
 
@@ -293,7 +293,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
                 AbilityControlBlock = AbilityProtocol.ToControlBlock(avatarAbilities),
                 AvatarAbilityInfo = AbilityProtocol.ToSyncState(avatarAbilities),
                 WeaponAbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities),
-                SceneEntityInfo = entity.Info,
+                SceneEntityInfo = entity.ToProtocol(),
                 IsOnScene = isCurrent,
                 IsPlayerCurAvatar = isCurrent
             });
@@ -310,7 +310,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         // TODO: Validate `enter_scene_token`.
 
         var scene = player.Module<WorldModule>().Scene;
-        IEnumerable<SceneEntityInfo> entities = _spawned;
+        var entities = _spawned.Select(entity => entity.ToProtocol());
 
         if (scene is not null)
             entities = entities.Concat(scene.Monsters.Values.Select(monster => monster.Info));
@@ -428,7 +428,7 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, Game
         yield return new SceneEntityAppearNotify {
             AppearType = VisionType.VISION_TYPE_REPLACE,
             Param = previous.EntityId,
-            EntityList = { current.Info }
+            EntityList = { current.ToProtocol() }
         };
     }
 

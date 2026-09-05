@@ -261,6 +261,30 @@ public sealed class Avatar
         return info;
     }
 
+    public SceneAvatarInfo SceneInfo(uint uid, uint peerId, uint weaponEntityId)
+    {
+        var weapon = _equippedWeapon
+                     ?? throw new InvalidOperationException($"Avatar {AvatarId} has no equipped weapon.");
+
+        var sceneWeapon = weapon.ToSceneProtocol();
+        sceneWeapon.EntityId = weaponEntityId;
+
+        var info = new SceneAvatarInfo {
+            Uid = uid,
+            AvatarId = AvatarId,
+            Guid = Guid,
+            PeerId = peerId,
+            SkillDepotId = SkillDepotId,
+            BornTime = BornTime,
+            WearingFlycloakId = DefaultFlycloak,
+            EquipIdList = [weapon.ItemId],
+            Weapon = sceneWeapon
+        };
+
+        PopulateSceneProgression(info);
+        return info;
+    }
+
     public void PopulateSceneProgression(SceneAvatarInfo info)
     {
         info.CoreProudSkillLevel = CoreProudSkillLevel;

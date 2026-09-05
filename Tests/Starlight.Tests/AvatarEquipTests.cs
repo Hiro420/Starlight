@@ -487,6 +487,73 @@ public sealed class AvatarEquipTests
         Assert.Equal(MotionState.MOTION_STATE_STANDBY, appeared.MotionInfo.State);
     }
 
+    [Fact]
+    public async Task ChangeAvatar_SerializesCurrentWeaponAndFightProperties()
+    {
+        var data = Data();
+        var (player, _) = Player(uid: 1001, data, includeWorld: true);
+        var avatars = player.Module<AvatarModule>();
+        var inventory = player.Module<InventoryModule>();
+        var teams = player.Module<TeamModule>();
+        var world = player.Module<WorldModule>();
+        var scene = player.Module<SceneModule>();
+
+        await avatars.OnLogin();
+        var first = avatars.Avatars[10000005];
+        var (second, added) = await avatars.AddAvatar(10000007);
+        Assert.True(added);
+        Assert.NotNull(second);
+
+        await teams.OnSetUpAvatarTeam(new SetUpAvatarTeamReq {
+            TeamId = 1,
+            CurAvatarGuid = first.Guid,
+            AvatarTeamGuidList = { first.Guid, second.Guid }
+        });
+
+        world.EnterOwnWorld();
+        _ = scene.OnEnterSceneReady(new EnterSceneReadyReq { EnterSceneToken = 1 }).ToArray();
+        _ = scene.OnSceneInit(new SceneInitFinishReq { EnterSceneToken = 1 }).ToArray();
+
+        var weapon = Assert.Single(await inventory.AddWeapons(
+            [data.WeaponData[11502]],
+            level: 80,
+            refinement: 3));
+
+        var equip = await avatars.OnWearEquip(new WearEquipReq {
+            AvatarGuid = first.Guid,
+            EquipGuid = weapon.Guid
+        });
+        Assert.Equal(expected: 0, equip.Retcode);
+
+        await teams.OnChangeAvatar(new ChangeAvatarReq { Guid = second.Guid });
+        _ = scene.OnTeamChanged().ToArray();
+
+        await teams.OnChangeAvatar(new ChangeAvatarReq { Guid = first.Guid });
+        var appear = Assert.Single(scene.OnTeamChanged().OfType<SceneEntityAppearNotify>());
+        var appeared = Assert.Single(appear.EntityList);
+        var sceneAvatar = Assert.IsType<SceneAvatarInfo>(appeared.Avatar);
+        var sceneWeapon = Assert.IsType<SceneWeaponInfo>(sceneAvatar.Weapon);
+
+        Assert.Equal(first.Guid, sceneAvatar.Guid);
+        Assert.Equal(weapon.Guid, sceneWeapon.Guid);
+        Assert.Equal(weapon.ItemId, sceneWeapon.ItemId);
+        Assert.Equal(weapon.GadgetId, sceneWeapon.GadgetId);
+        Assert.Equal(weapon.Level, sceneWeapon.Level);
+        Assert.Equal(weapon.PromoteLevel, sceneWeapon.PromoteLevel);
+
+        var appearedFightProps = appeared.FightPropList.ToDictionary(
+            pair => (FightProperty)pair.PropType,
+            pair => pair.PropValue);
+
+        Assert.Equal(first.FightProps.Count, appearedFightProps.Count);
+
+        foreach (var (property, value) in first.FightProps)
+        {
+            Assert.True(appearedFightProps.TryGetValue(property, out var actual));
+            Assert.Equal(value, actual);
+        }
+    }
+
     [Theory]
     [InlineData("change")]
     [InlineData("setup")]

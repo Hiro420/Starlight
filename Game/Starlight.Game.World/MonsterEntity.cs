@@ -6,6 +6,8 @@ namespace Starlight.Game.World;
 
 public sealed class MonsterEntity
 {
+    private readonly Dictionary<FightProperty, float> _fightProps;
+
     private MonsterEntity(
         SceneEntityInfo info,
         MonsterData data,
@@ -17,7 +19,7 @@ public sealed class MonsterEntity
     {
         Info = info;
         Data = data;
-        FightProps = fightProps;
+        _fightProps = fightProps;
         Level = level;
         WeaponEntityId = weaponEntityId;
         WeaponGadgetId = weaponGadgetId;
@@ -25,7 +27,9 @@ public sealed class MonsterEntity
 
     public SceneEntityInfo Info { get; }
     public MonsterData Data { get; }
-    public IReadOnlyDictionary<FightProperty, float> FightProps { get; }
+    public IReadOnlyDictionary<FightProperty, float> FightProps => _fightProps;
+    public uint LastMoveReliableSeq { get; set; }
+    public uint AttackTargetId { get; set; }
     public IReadOnlyList<uint> Affixes => Data.Affixes;
     public IReadOnlyList<uint> Equips => Data.Equips;
     public uint EntityId => Info.EntityId;
@@ -91,7 +95,10 @@ public sealed class MonsterEntity
             EntityClientData = new EntityClientData(),
             EntityAuthorityInfo = new EntityAuthorityInfo {
                 AbilityInfo = new AbilitySyncStateInfo(),
-                AiInfo = new SceneEntityAiInfo(),
+                AiInfo = new SceneEntityAiInfo {
+                    IsAiOpen = true,
+                    BornPos = CopyVector(position)
+                },
                 BornPos = CopyVector(position),
                 ClientExtraInfo = new EntityClientExtraInfo { SkillAnchorPosition = new Vector() }
             },
@@ -107,6 +114,63 @@ public sealed class MonsterEntity
         }
 
         return new MonsterEntity(info, monster, fightProps, level, weaponEntityId, weaponGadgetId);
+    }
+
+    public float GetFightProperty(FightProperty property) =>
+        FightProps.GetValueOrDefault(property);
+
+    public void SetFightProperty(FightProperty property, float value)
+    {
+        _fightProps[property] = value;
+
+        var existing = Info.FightPropList.FirstOrDefault(pair => pair.PropType == (uint)property);
+
+        if (existing is null)
+            Info.FightPropList.Add(new FightPropPair { PropType = (uint)property, PropValue = value });
+        else
+            existing.PropValue = value;
+    }
+
+    public void SyncAiSkillCooldowns(AiSkillCdInfo info)
+    {
+        var ai = Info.EntityAuthorityInfo?.AiInfo;
+
+        if (ai is null)
+            return;
+
+        ai.SkillCdMap.Clear();
+        ai.SkillGroupCdMap.Clear();
+
+        foreach (var (skill, cd) in info.SkillCdMap)
+        {
+            ai.SkillCdMap[skill] = cd;
+        }
+
+        foreach (var (group, cd) in info.SkillGroupCdMap)
+        {
+            ai.SkillGroupCdMap[group] = cd;
+        }
+    }
+
+    public void SyncAiThreat(AiThreatInfo info)
+    {
+        var ai = Info.EntityAuthorityInfo?.AiInfo;
+
+        if (ai is null)
+            return;
+
+        ai.AiThreatMap.Clear();
+
+        foreach (var (entityId, threat) in info.AiThreatMap)
+        {
+            ai.AiThreatMap[entityId] = threat;
+        }
+    }
+
+    public void SetAlert(bool alert)
+    {
+        if (Info.EntityAuthorityInfo?.AiInfo is {} ai)
+            ai.IsEnteredCombat = alert;
     }
 
     private static Vector CopyVector(Vector? source) =>

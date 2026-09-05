@@ -39,4 +39,14 @@ public static class MessageExtensions
     /// </summary>
     public static void MergeFrom<T>(this T message, byte[] data) where T : ISelfSerializable<T> =>
         message.MergeFrom(T.Serializer, data);
+
+    // <summary>
+    // Creates a deep copy of <paramref name="message"/> using its own canonical serializer (<see cref="ISelfSerializable{T}"/>).
+    // </summary>
+    public static T Clone<T>(this T message) where T : ISelfSerializable<T>
+    {
+        var clone = (T)Activator.CreateInstance(typeof(T))!;
+        clone.MergeFrom(message.ToByteArray());
+        return clone;
+    }
 }
