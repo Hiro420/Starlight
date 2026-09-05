@@ -13,7 +13,12 @@ public sealed class GameData(IConfiguration config) : IHostedService
     [UsedImplicitly] public readonly Dictionary<uint, AvatarData> AvatarData = new();
     [UsedImplicitly] public readonly Dictionary<uint, AvatarSkillDepotData> AvatarSkillDepotData = new();
     [UsedImplicitly] public readonly Dictionary<uint, AvatarTalentData> AvatarTalentData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, AvatarSkillData> AvatarSkillData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, AvatarCurveData> AvatarCurveData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, AvatarPromoteData> AvatarPromoteData = new();
     [UsedImplicitly] public readonly Dictionary<uint, WeaponData> WeaponData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, WeaponCurveData> WeaponCurveData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, WeaponPromoteData> WeaponPromoteData = new();
     [UsedImplicitly] public readonly Dictionary<uint, MaterialData> MaterialData = new();
     [UsedImplicitly] public readonly Dictionary<uint, CoopPointData> CoopPointData = new();
     [UsedImplicitly] public readonly Dictionary<uint, GadgetData> GadgetData = new();
@@ -90,6 +95,19 @@ public sealed class GameData(IConfiguration config) : IHostedService
 
     public ProudSkillResourceData? ResolveProudSkill(uint groupId, uint level = 1) =>
         ProudSkillsByGroupAndLevel.GetValueOrDefault((groupId, level));
+
+    public uint GetProudSkillGroupMaxLevel(uint groupId) =>
+        ProudSkillsByGroupAndLevel.Keys
+            .Where(key => key.GroupId == groupId)
+            .Select(key => key.Level)
+            .DefaultIfEmpty()
+            .Max();
+
+    public AvatarPromoteData? ResolveAvatarPromote(uint promoteId, uint promoteLevel) =>
+        AvatarPromoteData.GetValueOrDefault(promoteId << 8 | promoteLevel);
+
+    public WeaponPromoteData? ResolveWeaponPromote(uint promoteId, uint promoteLevel) =>
+        WeaponPromoteData.GetValueOrDefault(promoteId << 8 | promoteLevel);
 
     public EquipAffixResourceData? ResolveEquipAffix(uint groupId, uint refinement) =>
         EquipAffixesByGroupAndLevel.GetValueOrDefault((groupId, refinement));

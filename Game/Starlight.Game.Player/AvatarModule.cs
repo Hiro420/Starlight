@@ -176,14 +176,7 @@ public sealed class AvatarModule(IPlayer player, GameData data, GuidManager guid
 
             _avatars.Add(avatarId, avatar);
 
-            var state = new NetAvatar {
-                AvatarId = avatar.AvatarId,
-                Guid = avatar.Guid,
-                Level = avatar.Level,
-                Constellation = avatar.Constellation,
-                BornTime = avatar.BornTime,
-                WeaponGuid = avatar.WeaponGuid
-            };
+            var state = CreateState(avatar);
             _avatarState.Add(avatarId, state);
             player.State.Avatars.Add(state);
         }
@@ -208,6 +201,8 @@ public sealed class AvatarModule(IPlayer player, GameData data, GuidManager guid
 
         lock (player.StateLock)
         {
+            avatar.EquipWeapon(weapon);
+            SyncState(avatar, _avatarState[avatar.AvatarId]);
             avatarInfo = avatar.Info();
         }
 
@@ -241,12 +236,16 @@ public sealed class AvatarModule(IPlayer player, GameData data, GuidManager guid
                     state.Level,
                     state.Constellation,
                     state.BornTime,
-                    state.WeaponGuid);
+                    state.WeaponGuid,
+                    state.SkillDepotId,
+                    state.TalentIdList,
+                    state.SkillLevelMap);
 
                 // State written before weapon persistence used the deterministic starter GUID.
                 if (state.WeaponGuid == 0)
                     state.WeaponGuid = avatar.WeaponGuid;
 
+                SyncState(avatar, state);
                 _avatars.Add(avatar.AvatarId, avatar);
                 _avatarState.Add(avatar.AvatarId, state);
             }
@@ -262,14 +261,7 @@ public sealed class AvatarModule(IPlayer player, GameData data, GuidManager guid
                     var guid = (ulong)player.Uid << 32 | 1;
                     var avatar = Avatar.Create(data, starterAvatarId, guid);
 
-                    var state = new NetAvatar {
-                        AvatarId = avatar.AvatarId,
-                        Guid = avatar.Guid,
-                        Level = avatar.Level,
-                        Constellation = avatar.Constellation,
-                        BornTime = avatar.BornTime,
-                        WeaponGuid = avatar.WeaponGuid
-                    };
+                    var state = CreateState(avatar);
 
                     _avatars.Add(starterAvatarId, avatar);
                     _avatarState.Add(starterAvatarId, state);
@@ -284,7 +276,35 @@ public sealed class AvatarModule(IPlayer player, GameData data, GuidManager guid
         lock (player.StateLock)
         {
             avatar.EquipWeapon(weapon);
-            _avatarState[avatar.AvatarId].WeaponGuid = weapon.Guid;
+            SyncState(avatar, _avatarState[avatar.AvatarId]);
+        }
+    }
+
+    private static NetAvatar CreateState(Avatar avatar)
+    {
+        var state = new NetAvatar();
+        SyncState(avatar, state);
+        return state;
+    }
+
+    private static void SyncState(Avatar avatar, NetAvatar state)
+    {
+        state.AvatarId = avatar.AvatarId;
+        state.Guid = avatar.Guid;
+        state.Level = avatar.Level;
+        state.Constellation = avatar.Constellation;
+        state.BornTime = avatar.BornTime;
+        state.WeaponGuid = avatar.WeaponGuid;
+        state.SkillDepotId = avatar.SkillDepotId;
+
+        state.TalentIdList.Clear();
+        state.TalentIdList.AddRange(avatar.AllTalentIds.Order());
+
+        state.SkillLevelMap.Clear();
+
+        foreach (var (skillId, level) in avatar.AllSkillLevels)
+        {
+            state.SkillLevelMap[skillId] = level;
         }
     }
 

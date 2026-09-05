@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Starlight.Game.Resources.Excel;
 
 namespace Starlight.Game.Resources.Binary;
 
@@ -19,6 +20,18 @@ public sealed class TalentConfigEntry
 
     [JsonPropertyName("paramRatio")]
     public JsonElement ParamRatio { get; set; }
+
+    [JsonPropertyName("talentIndex")]
+    public uint TalentIndex { get; set; }
+
+    [JsonPropertyName("extraLevel")]
+    public uint ExtraLevel { get; set; }
+
+    [JsonPropertyName("skillID")]
+    public uint SkillId { get; set; }
+
+    [JsonPropertyName("pointDelta")]
+    public int PointDelta { get; set; }
 }
 
 public sealed class ProudSkillResourceData
@@ -38,6 +51,12 @@ public sealed class ProudSkillResourceData
     [JsonPropertyName("openConfig")]
     public string OpenConfig { get; set; } = string.Empty;
 
+    [JsonPropertyName("unlockProudSkillParam")]
+    public string DisplayType { get; set; } = string.Empty;
+
+    [JsonPropertyName("addProps")]
+    public List<FightPropData> AddProps { get; set; } = [];
+
     [JsonPropertyName("paramList")]
     public List<float> ParamList { get; set; } = [];
 }
@@ -52,6 +71,12 @@ public sealed class EquipAffixResourceData
 
     [JsonPropertyName("openConfig")]
     public string OpenConfig { get; set; } = string.Empty;
+
+    [JsonPropertyName("unlockProudSkillParam")]
+    public string DisplayType { get; set; } = string.Empty;
+
+    [JsonPropertyName("addProps")]
+    public List<FightPropData> AddProps { get; set; } = [];
 
     [JsonPropertyName("paramList")]
     public List<float> ParamList { get; set; } = [];

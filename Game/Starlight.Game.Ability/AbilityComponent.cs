@@ -1,3 +1,4 @@
+using Starlight.Game.Resources;
 using Starlight.Game.Resources.Binary;
 
 namespace Starlight.Game.Ability;
@@ -252,6 +253,16 @@ public sealed class AbilityComponent
         foreach (var (property, value) in values)
         {
             _fightProperties[property] = value;
+        }
+    }
+
+    public void ReinitializeFightProperties(IEnumerable<KeyValuePair<FightProperty, float>> values)
+    {
+        _fightProperties.Clear();
+
+        foreach (var (property, value) in values)
+        {
+            _fightProperties[(uint)property] = value;
         }
     }
 

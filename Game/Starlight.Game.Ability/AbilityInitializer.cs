@@ -143,9 +143,16 @@ public sealed class AbilityInitializer(GameData data)
 
             if (depot is not null)
             {
-                foreach (var proud in depot.InherentProudSkillOpens
-                             .Where(x => x.ProudSkillGroupId != 0 && x.NeedAvatarPromoteLevel <= sources.PromoteLevel)
-                             .Select(x => data.ResolveProudSkill(x.ProudSkillGroupId, level: 1))
+                var proudSkillGroups = depot.InherentProudSkillOpens
+                    .Where(x => x.ProudSkillGroupId != 0 && x.NeedAvatarPromoteLevel <= sources.PromoteLevel)
+                    .Select(x => x.ProudSkillGroupId)
+                    .Concat(depot.SpecialProudSkillOpens
+                        .Where(x => x.ProudSkillGroupId != 0)
+                        .Select(x => x.ProudSkillGroupId))
+                    .Distinct();
+
+                foreach (var proud in proudSkillGroups
+                             .Select(groupId => data.ResolveProudSkill(groupId, level: 1))
                              .Where(x => x is not null)
                              .Select(x => x!)
                              .OrderBy(x => x.ProudSkillId))
