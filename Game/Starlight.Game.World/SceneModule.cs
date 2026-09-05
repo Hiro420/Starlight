@@ -2,13 +2,14 @@ using Serilog;
 using Starlight.Game.Ability;
 using Starlight.Game.Modules;
 using Starlight.Game.Player;
+using Starlight.Game.Resources;
 using Starlight.Protobuf.Core;
 using Starlight.Protocol;
 using Starlight.Rpc.Proto;
 
 namespace Starlight.Game.World;
 
-public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder) : IModule
+public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder, GameData? data = null) : IModule
 {
     #region Beach Simulator
 
@@ -308,9 +309,15 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder) : IM
     {
         // TODO: Validate `enter_scene_token`.
 
+        var scene = player.Module<WorldModule>().Scene;
+        IEnumerable<SceneEntityInfo> entities = _spawned;
+
+        if (scene is not null)
+            entities = entities.Concat(scene.Monsters.Values.Select(monster => monster.Info));
+
         yield return new SceneEntityAppearNotify {
             AppearType = VisionType.VISION_TYPE_BORN,
-            EntityList = [.. _spawned]
+            EntityList = [.. entities]
         };
 
         yield return new EnterSceneDoneRsp { EnterSceneToken = msg.EnterSceneToken };
@@ -364,9 +371,18 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder) : IM
         if (!TryDecode(data, out EntityMoveInfo move) || move.MotionInfo is not {} incoming)
             return;
 
-        var entity = _teamEntities.Values.FirstOrDefault(a => a.EntityId == move.EntityId);
+        var avatar = _teamEntities.Values.FirstOrDefault(entity => entity.EntityId == move.EntityId);
+        var motion = avatar?.Info.MotionInfo;
 
-        if (entity?.Info.MotionInfo is not {} motion)
+        if (motion is null)
+        {
+            var scene = player.Module<WorldModule>().Scene;
+
+            if (scene is not null && scene.Monsters.TryGetValue(move.EntityId, out var monster))
+                motion = monster.Info.MotionInfo;
+        }
+
+        if (motion is null)
             return;
 
         motion.Pos = incoming.Pos;
@@ -460,6 +476,65 @@ public sealed class SceneModule(IPlayer player, IInvokeForwarder forwarder) : IM
             message = null!;
             return false;
         }
+    }
+
+    public async Task<MonsterEntity> SpawnMonster(uint monsterId, uint level)
+    {
+        var gameData = data ?? throw new InvalidOperationException("Game data is unavailable.");
+        var module = player.Module<WorldModule>();
+        var scene = module.Scene ?? throw new InvalidOperationException("Player is not in a scene.");
+
+        if (!gameData.MonsterData.TryGetValue(monsterId, out var monster))
+            throw new KeyNotFoundException($"Monster {monsterId} does not exist in resources.");
+
+        if (!gameData.MonsterCurveData.ContainsKey(level))
+            throw new ArgumentOutOfRangeException(nameof(level), level, "Monster level curve does not exist.");
+
+        var current = _teamEntities.GetValueOrDefault(_currentAvatarGuid);
+
+        var motion = current?.Info.MotionInfo ?? _lastCurrentMotion
+            ?? throw new InvalidOperationException("Current avatar is not materialized in the scene.");
+
+        var position = CopyVector(motion.Pos);
+        position.Y += 3f;
+        var rotation = CopyVector(motion.Rot);
+
+        var entity = MonsterEntity.Create(scene, gameData, monster, level, position, rotation);
+        var abilities = player.Module<AbilityModule>();
+
+        var monsterAbilities = abilities.RegisterMonster(
+            module.World.Abilities,
+            new AbilityOwner(entity.EntityId, AbilityOwnerType.Monster, module.World.HostPeerId),
+            monsterId,
+            scene.Id);
+
+        monsterAbilities.ReinitializeFightProperties(entity.FightProps);
+        entity.Info.EntityAuthorityInfo!.AbilityInfo = AbilityProtocol.ToSyncState(monsterAbilities);
+
+        if (entity.WeaponEntityId != 0 && entity.WeaponGadgetId != 0)
+        {
+            var weaponAbilities = abilities.RegisterWeapon(
+                module.World.Abilities,
+                new AbilityOwner(entity.WeaponEntityId, AbilityOwnerType.Weapon, module.World.HostPeerId),
+                entity.WeaponGadgetId);
+
+            if (entity.Info.Monster?.WeaponList.Count > 0)
+                entity.Info.Monster.WeaponList[0].AbilityInfo = AbilityProtocol.ToSyncState(weaponAbilities);
+        }
+
+        scene.AddMonster(entity);
+
+        var notification = new SceneEntityAppearNotify {
+            AppearType = VisionType.VISION_TYPE_BORN,
+            EntityList = { entity.Info }
+        };
+
+        var recipients = module.World.Peers.Values
+            .Where(peer => peer.Module<WorldModule>().Scene?.Id == scene.Id)
+            .Select(peer => peer.Send(notification));
+
+        await Task.WhenAll(recipients);
+        return entity;
     }
 
     [Opcode]

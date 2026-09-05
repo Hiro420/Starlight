@@ -253,7 +253,8 @@ public sealed class AbilityInitializer(GameData data)
         if (config is not null)
             AddAbilities(seeds, config.Abilities, isLightConfig);
 
-        if (isElite && !string.IsNullOrEmpty(data.GlobalCombat.DefaultAbilities.MonsterEliteAbilityName))
+        if ((isElite || monster?.Type == "MONSTER_BOSS") &&
+            !string.IsNullOrEmpty(data.GlobalCombat.DefaultAbilities.MonsterEliteAbilityName))
             seeds.Add(new AbilityEmbryoSeed(data.GlobalCombat.DefaultAbilities.MonsterEliteAbilityName));
 
         AddAffixAbilities(seeds, affixes, preAdd: false);

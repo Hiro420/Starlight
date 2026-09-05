@@ -23,6 +23,9 @@ public sealed class GameData(IConfiguration config) : IHostedService
     [UsedImplicitly] public readonly Dictionary<uint, CoopPointData> CoopPointData = new();
     [UsedImplicitly] public readonly Dictionary<uint, GadgetData> GadgetData = new();
     [UsedImplicitly] public readonly Dictionary<uint, MonsterData> MonsterData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, MonsterCurveData> MonsterCurveData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, MonsterDescribeData> MonsterDescribeData = new();
+    [UsedImplicitly] public readonly Dictionary<uint, MonsterSpecialNameData> MonsterSpecialNameData = new();
     [UsedImplicitly] public readonly Dictionary<uint, MonsterAffixData> MonsterAffixData = new();
     [UsedImplicitly] public readonly Dictionary<uint, SceneData> SceneData = new();
 
@@ -78,8 +81,63 @@ public sealed class GameData(IConfiguration config) : IHostedService
         if (!MonsterData.TryGetValue(monsterId, out var monster) || string.IsNullOrEmpty(monster.MonsterName))
             return null;
 
-        return MonsterConfigs.GetValueOrDefault($"{monster.MonsterName}_{monsterId}")
-               ?? MonsterConfigs.GetValueOrDefault(monster.MonsterName);
+        var monsterName = string.Equals(monster.MonsterName, "???", StringComparison.Ordinal) ? "Unknown" : monster.MonsterName;
+
+        return MonsterConfigs.GetValueOrDefault($"{monsterName}_{monsterId}")
+               ?? MonsterConfigs.GetValueOrDefault(monsterName);
+    }
+
+    public uint ResolveMonsterWeaponId(uint monsterId)
+    {
+        if (!MonsterData.TryGetValue(monsterId, out var monster))
+            return 0;
+
+        var weaponId = 0u;
+
+        foreach (var equipId in monster.Equips)
+        {
+            if (equipId != 0 &&
+                GadgetData.TryGetValue(equipId, out var gadget) &&
+                string.Equals(gadget.ItemJsonName, "Default_MonsterWeapon", StringComparison.Ordinal))
+                weaponId = equipId;
+        }
+
+        return weaponId;
+    }
+
+    public MonsterDescribeData? ResolveMonsterDescribe(uint monsterId)
+    {
+        if (!MonsterData.TryGetValue(monsterId, out var monster) || monster.DescribeId == 0)
+            return null;
+
+        return MonsterDescribeData.GetValueOrDefault(monster.DescribeId);
+    }
+
+    public uint ResolveMonsterSpecialNameId(uint monsterId)
+    {
+        var describe = ResolveMonsterDescribe(monsterId);
+
+        if (describe is null || describe.SpecialNameLabId == 0)
+            return 0;
+
+        return MonsterSpecialNameData.Values
+            .FirstOrDefault(data => data.SpecialNameLabId == describe.SpecialNameLabId)
+            ?.Id ?? 0;
+    }
+
+    public IReadOnlyList<uint> ResolveMonsterSummonTags(uint monsterId)
+    {
+        var config = ResolveMonsterConfig(monsterId);
+        var tags = config?.Combat?.Summon?.SummonTags;
+
+        if (tags is null || tags.Count == 0)
+            return [];
+
+        return tags
+            .Select(tag => tag.SummonTag)
+            .Where(tag => tag != 0)
+            .Distinct()
+            .ToArray();
     }
 
     public ConfigLevelEntity? ResolveLevelEntity(uint sceneId)

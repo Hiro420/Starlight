@@ -28,12 +28,40 @@ public sealed class CurveInfoData
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
+    [JsonPropertyName("arith")]
+    public string Arithmetic { get; set; } = string.Empty;
+
     [JsonPropertyName("value")]
     public float Value { get; set; } = 1f;
 }
 
 [GameResource("AvatarCurveExcelConfigData.json")]
 public sealed class AvatarCurveData : Data
+{
+    [JsonPropertyName("level")]
+    public uint Level { get; set; }
+
+    [JsonPropertyName("curveInfos")]
+    public List<CurveInfoData> CurveInfos { get; set; } = [];
+
+    private Dictionary<string, float> _curveInfoMap = new(StringComparer.Ordinal);
+
+    public override void OnLoad()
+    {
+        Id = Level;
+
+        _curveInfoMap = CurveInfos
+            .Where(info => !string.IsNullOrEmpty(info.Type))
+            .GroupBy(info => info.Type, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal);
+    }
+
+    public float GetMultiplier(string curve) =>
+        string.IsNullOrEmpty(curve) ? 1f : _curveInfoMap.GetValueOrDefault(curve, defaultValue: 1f);
+}
+
+[GameResource("MonsterCurveExcelConfigData.json")]
+public sealed class MonsterCurveData : Data
 {
     [JsonPropertyName("level")]
     public uint Level { get; set; }
