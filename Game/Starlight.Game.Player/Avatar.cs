@@ -122,9 +122,16 @@ public sealed class Avatar
 
         foreach (var skill in Skills)
         {
-            info.SkillLevelMap[skill] = 1;
+            info.SkillLevelMap[skill] = GetSkillLevel(skill);
         }
 
         return info;
+    }
+
+    public uint GetSkillLevel(uint skill)
+    {
+        //return (uint)(SkillLevelMap.TryGetValue(skill, out var level) ? level : 1);
+        // TODO
+        return 1;
     }
 }
