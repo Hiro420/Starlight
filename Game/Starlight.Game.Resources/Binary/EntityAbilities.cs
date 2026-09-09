@@ -22,7 +22,28 @@ public sealed class ConfigEntityAvatar : ConfigEntityBase
 {}
 
 public sealed class ConfigEntityMonster : ConfigEntityBase
-{}
+{
+    [JsonPropertyName("combat")]
+    public ConfigEntityCombat? Combat { get; set; }
+}
+
+public sealed class ConfigEntityCombat
+{
+    [JsonPropertyName("summon")]
+    public ConfigEntitySummon? Summon { get; set; }
+}
+
+public sealed class ConfigEntitySummon
+{
+    [JsonPropertyName("summonTags")]
+    public List<ConfigEntitySummonTag> SummonTags { get; set; } = [];
+}
+
+public sealed class ConfigEntitySummonTag
+{
+    [JsonPropertyName("summonTag")]
+    public uint SummonTag { get; set; }
+}
 
 public sealed class ConfigEntityGadget : ConfigEntityBase
 {}

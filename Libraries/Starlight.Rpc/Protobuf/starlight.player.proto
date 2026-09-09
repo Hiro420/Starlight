@@ -38,6 +38,8 @@ message NetPlayerState {
   uint32 born_avatar_id = 5;
   repeated NetAvatarTeam avatar_teams = 6;
   uint32 current_avatar_team_id = 7;
+  repeated uint32 unlocked_name_card_ids = 8;
+  repeated uint32 unlocked_profile_picture_ids = 9;
 }
 
 message NetAvatarTeam {
@@ -70,6 +72,9 @@ message NetAvatar {
   uint32 constellation = 4;
   uint32 born_time = 5;
   uint64 weapon_guid = 6;
+  uint32 skill_depot_id = 7;
+  repeated uint32 talent_id_list = 8;
+  map<uint32, uint32> skill_level_map = 9;
 }
 
 // --- MESSAGES START --- \\

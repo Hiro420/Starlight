@@ -1,3 +1,4 @@
+using Starlight.Game;
 using Starlight.Game.Resources;
 using Starlight.Game.Resources.Binary;
 using System.Globalization;
@@ -103,10 +104,11 @@ public sealed class AbilityInitializer(GameData data)
         uint sceneId,
         AvatarAbilitySources? sources = null,
         IEnumerable<AbilityEmbryoSeed>? additional = null,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     )
     {
-        var component = scope.Register(owner);
+        var component = scope.Register(owner, fightProperties: fightProperties);
         component.ResetServerAbilities();
         component.ClearTargetAbilitySpecials();
 
@@ -138,14 +140,21 @@ public sealed class AbilityInitializer(GameData data)
                 if (!data.AvatarTalentData.TryGetValue(talentId, out var talent) || string.IsNullOrEmpty(talent.ConfigName))
                     continue;
 
-                ApplyTalent(component, seeds, data.ResolveTalent(talent.ConfigName), []);
+                ApplyTalent(component, seeds, data.ResolveTalent(talent.ConfigName), talent.ParamList);
             }
 
             if (depot is not null)
             {
-                foreach (var proud in depot.InherentProudSkillOpens
-                             .Where(x => x.ProudSkillGroupId != 0 && x.NeedAvatarPromoteLevel <= sources.PromoteLevel)
-                             .Select(x => data.ResolveProudSkill(x.ProudSkillGroupId, level: 1))
+                var proudSkillGroups = depot.InherentProudSkillOpens
+                    .Where(x => x.ProudSkillGroupId != 0 && x.NeedAvatarPromoteLevel <= sources.PromoteLevel)
+                    .Select(x => x.ProudSkillGroupId)
+                    .Concat(depot.SpecialProudSkillOpens
+                        .Where(x => x.ProudSkillGroupId != 0)
+                        .Select(x => x.ProudSkillGroupId))
+                    .Distinct();
+
+                foreach (var proud in proudSkillGroups
+                             .Select(groupId => data.ResolveProudSkill(groupId, level: 1))
                              .Where(x => x is not null)
                              .Select(x => x!)
                              .OrderBy(x => x.ProudSkillId))
@@ -217,7 +226,8 @@ public sealed class AbilityInitializer(GameData data)
         IEnumerable<uint>? groupAffixes = null,
         bool isElite = false,
         bool isLightConfig = false,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     )
     {
         data.MonsterData.TryGetValue(monsterId, out var monster);
@@ -225,7 +235,7 @@ public sealed class AbilityInitializer(GameData data)
         if (monster?.SecurityLevel == "BOSS" && owner.ClientInitInvokeLimit == 0)
             owner = owner with { ClientInitInvokeLimit = 200 };
 
-        var component = scope.Register(owner);
+        var component = scope.Register(owner, fightProperties: fightProperties);
         component.ResetEmbryos(new List<string>());
         component.ClearTargetAbilitySpecials();
 
@@ -246,7 +256,8 @@ public sealed class AbilityInitializer(GameData data)
         if (config is not null)
             AddAbilities(seeds, config.Abilities, isLightConfig);
 
-        if (isElite && !string.IsNullOrEmpty(data.GlobalCombat.DefaultAbilities.MonsterEliteAbilityName))
+        if ((isElite || monster?.Type == "MONSTER_BOSS") &&
+            !string.IsNullOrEmpty(data.GlobalCombat.DefaultAbilities.MonsterEliteAbilityName))
             seeds.Add(new AbilityEmbryoSeed(data.GlobalCombat.DefaultAbilities.MonsterEliteAbilityName));
 
         AddAffixAbilities(seeds, affixes, preAdd: false);

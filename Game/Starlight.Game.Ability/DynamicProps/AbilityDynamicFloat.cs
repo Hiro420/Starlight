@@ -118,7 +118,14 @@ internal static class AbilityDynamicFloat
         if (context.Definition is {} definition &&
             definition.AbilitySpecials.ValueKind == JsonValueKind.Object &&
             definition.AbilitySpecials.TryGetProperty(key, out var special))
-            return Evaluate(context, special, owner, defaultValue);
+        {
+            var resolved = Evaluate(context, special, owner, defaultValue);
+
+            if (context.Ability is not null)
+                owner.TryApplyTargetAbilitySpecial(context.Ability.Name, named, resolved, out resolved);
+
+            return resolved;
+        }
 
         return defaultValue;
     }

@@ -5,6 +5,7 @@ using Serilog;
 using Serilog.Core;
 using Serilog.Events;
 using Serilog.Sinks.SystemConsole.Themes;
+using Starlight.Chat;
 using Starlight.Common;
 using Starlight.Console;
 using Starlight.Crypto.Client;
@@ -68,6 +69,8 @@ internal static class Program
     /// <param name="args">Command line arguments.</param>
     private static async Task<int> Main(string[] args)
     {
+        using var interactiveConsole = new InteractiveConsole();
+
         Log.Logger = new LoggerConfiguration()
             .Enrich.FromLogContext()
             .MinimumLevel.ControlledBy(LogLevel)
@@ -106,6 +109,7 @@ internal static class Program
             var moduleRegistry = new ModuleRegistry()
                 .AddGameComponent()
                 .AddPlayerComponent()
+                .AddStarlightComponent()
                 .AddAbilityComponent()
                 .AddWorldComponent()
                 .Build();
@@ -122,7 +126,12 @@ internal static class Program
                 // The server services use these to operate.
                 .Services
                 .AddSerilog()
+                .AddSingleton(interactiveConsole)
                 .AddCommands()
+                .AddSingleton(config.Chat)
+                .AddSingleton<ServerFriendProfile>()
+                .AddSingleton<ChatService>()
+                .AddSingleton<ProfileCosmeticService>()
                 .AddSingleton<GameData>()
                 .AddSingleton<ProtocolRegistry>(protocol)
                 .AddSingleton<AbilityInitializer>()
@@ -131,8 +140,12 @@ internal static class Program
                     services.GetRequiredService<IConfiguration>().GetValue<bool>("Gate:Connections:LogAbilities")))
                 .AddAbilityInvokeHandlers()
                 .AddSingleton<WorldAbilityRouter>()
+                .AddSingleton<IWeaponEntityService, WeaponEntityService>()
                 .AddSingleton<IAbilityScopeResolver>(services => services.GetRequiredService<WorldAbilityRouter>())
                 .AddSingleton<IInvokeForwarder>(services => services.GetRequiredService<WorldAbilityRouter>())
+                .AddSingleton<WorldGadgetRuntime>()
+                .AddSingleton<IAbilityGadgetRuntime>(services => services.GetRequiredService<WorldGadgetRuntime>())
+                .AddSingleton<IAbilityDamageRuntime>(services => services.GetRequiredService<WorldAbilityRouter>())
                 .AddSingleton<GuidManager>(_ => new GuidManager(serverId: 1))
                 .AddHostedService(s => s.GetRequiredService<GameData>())
                 .AddSingleton<WorldManager>()

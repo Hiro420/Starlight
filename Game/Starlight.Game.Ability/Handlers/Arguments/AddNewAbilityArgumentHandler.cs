@@ -16,7 +16,7 @@ public sealed class AddNewAbilityArgumentHandler(ProtocolRegistry protocol, Game
         {
             if (context.LogAbilitiesEnabled)
                 Log.Warning("AddNewAbilityArgumentHandler: Invalid ability data {@AbilityData}", context.Invoke.AbilityData.ToBase64());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Invalid ability data"));
         }
 
         var name = AbilityProtocol.FromAbilityString(applied.AbilityName);

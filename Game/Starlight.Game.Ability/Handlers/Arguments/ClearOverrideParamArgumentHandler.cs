@@ -17,7 +17,7 @@ public sealed class ClearOverrideParamArgumentHandler(ProtocolRegistry protocol)
                 Log.Information("ClearOverrideParamArgumentHandler: Could not find InstancedAbilityId {@InstancedAbilityId} | {@AbilityData}",
                     head.InstancedAbilityId, context.Invoke.AbilityData.ToBase64());
 
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Could not find InstancedAbilityId"));
         }
 
         if (AbilityInvokeDecode.Try<AbilityString>(protocol, context.Invoke.AbilityData, out var key))

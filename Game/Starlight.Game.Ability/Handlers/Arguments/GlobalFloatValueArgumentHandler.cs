@@ -14,7 +14,7 @@ public sealed class GlobalFloatValueArgumentHandler(ProtocolRegistry protocol)
         {
             if (context.LogAbilitiesEnabled)
                 Log.Warning("GlobalFloatValueArgumentHandler: Invalid ability data {@AbilityData}", context.Invoke.AbilityData.ToBase64());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Invalid ability data"));
         }
 
         // Grasscutter accepts both string and hash keys and salvages undeclared scalar types.
@@ -24,7 +24,7 @@ public sealed class GlobalFloatValueArgumentHandler(ProtocolRegistry protocol)
         {
             if (context.LogAbilitiesEnabled)
                 Log.Warning("GlobalFloatValueArgumentHandler: Invalid float value {@AbilityData}", context.Invoke.AbilityData.ToBase64());
-            return ValueTask.CompletedTask;
+            return ValueTask.FromException(new InvalidOperationException("Invalid float value"));
         }
 
         if (context.LogAbilitiesEnabled)

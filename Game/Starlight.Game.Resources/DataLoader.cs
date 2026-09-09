@@ -81,9 +81,9 @@ internal static partial class DataLoader
                     {
                         if (item is not Data resource) continue;
 
-                        var id = resource.GetId();
-
                         resource.OnLoad();
+
+                        var id = resource.GetId();
 
                         if (dictionary.Contains(id))
                         {

@@ -11,9 +11,29 @@ public sealed class WeaponData : Data
     [JsonPropertyName("gadgetId")]
     public uint GadgetId { get; set; }
 
-    /// The passive affix carried by this weapon. It's map value is refinement - 1.
+    [JsonPropertyName("weaponPromoteId")]
+    public uint WeaponPromoteId { get; set; }
+
+    [JsonPropertyName("weaponProp")]
+    public List<WeaponPropertyData> WeaponProperties { get; set; } = [];
+
     [JsonPropertyName("skillAffix")]
     public List<uint> SkillAffix { get; set; } = [];
+}
+
+public sealed class WeaponPropertyData
+{
+    [JsonPropertyName("propType")]
+    public string PropType { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string CurveType { get; set; } = string.Empty;
+
+    [JsonPropertyName("initValue")]
+    public float InitValue { get; set; }
+
+    public bool TryGetProperty(out FightProperty property) =>
+        FightPropertyExtensions.TryParse(PropType, out property) && property != FightProperty.FIGHT_PROP_NONE;
 }
 
 [GameResource("MaterialExcelConfigData.json")]
@@ -31,8 +51,26 @@ public sealed class MaterialData : Data
     [JsonPropertyName("materialType")]
     public string MaterialType { get; set; } = string.Empty;
 
+    [JsonPropertyName("gadgetId")]
+    public uint GadgetId { get; set; }
+
+    [JsonPropertyName("useTarget")]
+    public string UseTarget { get; set; } = string.Empty;
+
+    [JsonPropertyName("itemUse")]
+    public List<ItemUseData> ItemUse { get; set; } = [];
+
     [JsonPropertyName("useOnGain")]
     public bool UseOnGain { get; set; }
 
     public bool IsInventoryMaterial => ItemType == "ITEM_MATERIAL" && !UseOnGain;
+}
+
+public sealed class ItemUseData
+{
+    [JsonPropertyName("useOp")]
+    public string UseOp { get; set; } = string.Empty;
+
+    [JsonPropertyName("useParam")]
+    public List<string> UseParam { get; set; } = [];
 }

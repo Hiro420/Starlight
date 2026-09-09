@@ -1,17 +1,29 @@
+using Starlight.Game;
 using Starlight.Game.Player;
+using Starlight.Game.Resources;
 using Starlight.Protocol;
 
 namespace Starlight.Game.World;
 
-public sealed record AvatarEntity(SceneEntityInfo Info, uint WeaponEntityId)
+public sealed class AvatarEntity : SceneEntity
 {
-    private const uint Alive = 1;
+    private AvatarEntity(
+        Scene scene,
+        SceneEntityInfo info,
+        FightPropertyStore fightProperties,
+        Avatar avatar
+    ) : base(scene, info, fightProperties)
+    {
+        Avatar = avatar;
+    }
 
-    public uint EntityId => Info.EntityId;
+    public Avatar Avatar { get; }
+    public uint WeaponEntityId => Avatar.Weapon?.WeaponEntity?.EntityId ?? 0;
+    public override uint AuthorityPeerId => Info.Avatar?.PeerId ?? 0;
+    public override bool RemoveFromSceneOnDeath => false;
 
-    /// <summary>Spawns <paramref name="avatar"/> into <paramref name="world"/> standing at <paramref name="position"/>.</summary>
     public static AvatarEntity Create(
-        World world,
+        Scene scene,
         uint uid,
         uint peerId,
         Avatar avatar,
@@ -20,7 +32,19 @@ public sealed record AvatarEntity(SceneEntityInfo Info, uint WeaponEntityId)
         Vector? refPos = null
     )
     {
-        var weaponEntityId = world.NextEntityId(ProtEntityType.PROT_ENTITY_TYPE_WEAPON);
+        var world = scene.World;
+        var inventory = world.Owner.Module<InventoryModule>();
+
+        var weaponItem = avatar.Weapon ?? inventory.Weapons.FirstOrDefault(w => w.Guid == avatar.WeaponGuid)
+            ?? throw new InvalidOperationException(
+                $"Weapon {avatar.WeaponItemId} with GUID {avatar.WeaponGuid} not found in inventory");
+
+        if (weaponItem.WeaponEntity is not EntityWeapon weaponEntity || !ReferenceEquals(weaponEntity.Scene, scene))
+        {
+            weaponEntity = new EntityWeapon(scene, weaponItem);
+            weaponItem.WeaponEntity = weaponEntity;
+            scene.AddWeapon(weaponEntity);
+        }
 
         var sceneAvatar = new SceneAvatarInfo {
             Uid = uid,
@@ -30,30 +54,21 @@ public sealed record AvatarEntity(SceneEntityInfo Info, uint WeaponEntityId)
             SkillDepotId = avatar.SkillDepotId,
             BornTime = avatar.BornTime,
             WearingFlycloakId = Avatar.DefaultFlycloak,
-            EquipIdList = [avatar.WeaponItemId],
-            Weapon = new SceneWeaponInfo {
-                EntityId = weaponEntityId,
-                GadgetId = avatar.WeaponGadgetId,
-                ItemId = avatar.WeaponItemId,
-                Guid = avatar.WeaponGuid,
-                Level = 1
-            }
+            EquipIdList = [weaponItem.ItemId],
+            Weapon = weaponItem.ToSceneProtocol()
         };
 
-        foreach (var skill in avatar.Skills)
-        {
-            sceneAvatar.SkillLevelMap[skill] = 1;
-        }
+        avatar.PopulateSceneProgression(sceneAvatar);
 
         var info = new SceneEntityInfo {
             EntityType = ProtEntityType.PROT_ENTITY_TYPE_AVATAR,
             EntityId = world.NextEntityId(ProtEntityType.PROT_ENTITY_TYPE_AVATAR),
-            LifeState = Alive,
+            LifeState = avatar.GetFightProperty(FightProperty.FIGHT_PROP_CUR_HP) <= 0 ? 2u : 1u,
             MotionInfo = new MotionInfo {
-                Pos = position,
-                Rot = rotation ?? new Vector(),
+                Pos = CopyVector(position),
+                Rot = CopyVector(rotation),
                 Speed = new Vector(),
-                RefPos = refPos ?? new Vector(),
+                RefPos = CopyVector(refPos),
                 State = MotionState.MOTION_STATE_STANDBY
             },
             EntityClientData = new EntityClientData(),
@@ -63,16 +78,24 @@ public sealed record AvatarEntity(SceneEntityInfo Info, uint WeaponEntityId)
                 ClientExtraInfo = new EntityClientExtraInfo { SkillAnchorPosition = new Vector() }
             },
             PropList = [
-                new PropPair { Type = (uint)PlayerProperty.Level, PropValue = PlayerProperty.Level.Value(1) }
+                new PropPair { Type = (uint)PlayerProperty.Level, PropValue = PlayerProperty.Level.Value(avatar.Level) }
             ],
             Avatar = sceneAvatar
         };
 
-        foreach (var (prop, value) in avatar.FightProps)
-        {
-            info.FightPropList.Add(new FightPropPair { PropType = prop, PropValue = value });
-        }
-
-        return new AvatarEntity(info, weaponEntityId);
+        return new AvatarEntity(scene, info, avatar.FightPropertyStore, avatar);
     }
+
+    public void SyncWeapon()
+    {
+        if (Info.Avatar is not {} sceneAvatar || Avatar.Weapon is not {} weapon)
+            return;
+
+        sceneAvatar.EquipIdList.Clear();
+        sceneAvatar.EquipIdList.Add(weapon.ItemId);
+        sceneAvatar.Weapon = weapon.ToSceneProtocol();
+    }
+
+    private static Vector CopyVector(Vector? source) =>
+        source is null ? new Vector() : new Vector { X = source.X, Y = source.Y, Z = source.Z };
 }

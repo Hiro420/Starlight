@@ -1,4 +1,5 @@
 using Google.Protobuf;
+using Starlight.Game;
 using Starlight.Game.Ability.Handlers;
 using Starlight.Game.Modules;
 using Starlight.Game.Player;
@@ -54,10 +55,11 @@ public sealed class AbilityModule(
         uint sceneId,
         AvatarAbilitySources? sources = null,
         IEnumerable<AbilityEmbryoSeed>? additional = null,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     ) =>
         initializer.RegisterAvatar(
-            scope, owner, avatarId, skillDepotId, sceneId, sources, additional, additionalLevelConfigs);
+            scope, owner, avatarId, skillDepotId, sceneId, sources, additional, additionalLevelConfigs, fightProperties);
 
     public AbilityComponent RegisterWeapon(AbilityScope scope, AbilityOwner owner, uint gadgetId) =>
         initializer.RegisterWeapon(scope, owner, gadgetId);
@@ -76,10 +78,11 @@ public sealed class AbilityModule(
         IEnumerable<uint>? groupAffixes = null,
         bool isElite = false,
         bool isLightConfig = false,
-        IEnumerable<string>? additionalLevelConfigs = null
+        IEnumerable<string>? additionalLevelConfigs = null,
+        FightPropertyStore? fightProperties = null
     ) =>
         initializer.RegisterMonster(
-            scope, owner, monsterId, sceneId, groupAffixes, isElite, isLightConfig, additionalLevelConfigs);
+            scope, owner, monsterId, sceneId, groupAffixes, isElite, isLightConfig, additionalLevelConfigs, fightProperties);
 
     public void Append(AbilityComponent component, IEnumerable<AbilityEmbryoSeed> abilities) =>
         initializer.Append(component, abilities);
@@ -231,18 +234,10 @@ public sealed class AbilityModule(
         AbilityModifierInstance? modifier = null;
 
         if (head.InstancedModifierId != 0 && source.TryGetModifier(head.InstancedModifierId, out modifier!))
-        {
-            if (modifier.InstancedAbilityId != 0)
-                source.TryGetAbility(modifier.InstancedAbilityId, out ability!);
-        }
+            ability = ResolveModifierAbility(world, source, modifier);
 
         if (ability is null && head.InstancedAbilityId != 0)
-        {
             source.TryGetAbility(head.InstancedAbilityId, out ability!);
-
-            if (target != source)
-                target.TryGetAbility(head.InstancedAbilityId, out ability!);
-        }
 
         // Moved to abstract handlers, kept as comment for the reference
         // DO NOT DELETE
@@ -317,13 +312,15 @@ public sealed class AbilityModule(
 
         await handlers.DispatchAsync(context);
 
-        ability = head.InstancedAbilityId != 0 && source.TryGetAbility(head.InstancedAbilityId, out var dispatchedAbility) ?
-            dispatchedAbility :
-            ability;
-
         modifier = head.InstancedModifierId != 0 && source.TryGetModifier(head.InstancedModifierId, out var dispatchedModifier) ?
             dispatchedModifier :
             modifier;
+
+        ability = modifier is not null ?
+            ResolveModifierAbility(world, source, modifier) ?? ability :
+            head.InstancedAbilityId != 0 && source.TryGetAbility(head.InstancedAbilityId, out var dispatchedAbility) ?
+                dispatchedAbility :
+                ability;
 
         await Publish(context with { Ability = ability, Modifier = modifier });
     }
@@ -529,6 +526,23 @@ public sealed class AbilityModule(
     */
 
     #endregion
+
+    private static AbilityInstance? ResolveModifierAbility(
+        AbilityScopeContext world,
+        AbilityComponent source,
+        AbilityModifierInstance modifier
+    )
+    {
+        if (modifier.InstancedAbilityId == 0)
+            return null;
+
+        if (modifier.ParentAbilityEntityId != 0 &&
+            world.TryGet(modifier.ParentAbilityEntityId, out var parent) &&
+            parent.TryGetAbility(modifier.InstancedAbilityId, out var parentAbility))
+            return parentAbility;
+
+        return source.TryGetAbility(modifier.InstancedAbilityId, out var sourceAbility) ? sourceAbility : null;
+    }
 
     private Resources.Binary.AbilityConfig? ResolveAbility(AbilityKey key) =>
         key.Name is not null ? data.ResolveAbility(key.Name) ?? data.ResolveAbility(key.Hash) : data.ResolveAbility(key.Hash);

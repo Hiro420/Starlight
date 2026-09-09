@@ -6,6 +6,7 @@ using Starlight.Game.Ability.Handlers.Mixins;
 using Starlight.Game.Ability.HpDebts;
 using Starlight.Game.Modules;
 using Starlight.Game.Player;
+using Starlight.Game.Resources;
 using Starlight.Game.Resources.Binary;
 using Starlight.Protobuf.Registry;
 using Starlight.Protocol;
@@ -22,6 +23,54 @@ public sealed class HpDebtActionTests
     private const uint MaxHp = 2000;
     private const uint CurHpDebts = 2004;
     private const uint CurHpPaidDebts = 2005;
+
+    [Fact]
+    public async Task ReviveElemEnergy_ResolvesTalentModifiedAbilitySpecial()
+    {
+        var forwarder = new RecordingForwarder();
+        var source = Avatar();
+        source.SetFightProperty((uint)FightProperty.FIGHT_PROP_MAX_FIRE_ENERGY, value: 60f);
+        source.SetFightProperty((uint)FightProperty.FIGHT_PROP_CUR_FIRE_ENERGY, value: 10f);
+
+        using var specials = JsonDocument.Parse("""{ "EnergySpecial": [2, 3, "ADD"] }""");
+
+        var definition = new AbilityConfig {
+            AbilityName = "TestAbility",
+            AbilitySpecials = specials.RootElement.Clone()
+        };
+
+        var ability = source.UpsertAbility(
+            instancedAbilityId: 1,
+            AbilityKey.FromName("TestAbility"),
+            definition: definition);
+
+        source.AddTargetAbilitySpecial(
+            ability.Name,
+            AbilityKey.FromName("EnergySpecial"),
+            delta: 5f,
+            ratio: 0.5f);
+
+        var context = Context(
+            source,
+            ability,
+            definition: definition,
+            action: Node("ReviveElemEnergy", json: """{ "value": "EnergySpecial" }"""));
+
+        await new ReviveElemEnergyHandler(forwarder).HandleAsync(context);
+
+        // Raw special: 2 + 3 = 5. Talent adjustment: (5 + 5) * 1.5 = 15.
+        Assert.Equal(expected: 25f, source.GetFightProperty((uint)FightProperty.FIGHT_PROP_CUR_FIRE_ENERGY));
+
+        Assert.Collection(
+            forwarder.Messages,
+            message => Assert.IsType<EntityFightPropUpdateNotify>(message),
+            message => {
+                var reason = Assert.IsType<EntityFightPropChangeReasonNotify>(message);
+                Assert.Equal(expected: 25f, reason.PropDelta);
+                Assert.Equal(PropChangeReason.PROP_CHANGE_REASON_ABILITY, reason.Reason);
+                Assert.Equal(ChangeEnergyReason.CHANGE_ENERGY_REASON_NONE, reason.ChangeEnergyReason);
+            });
+    }
 
     [Fact]
     public async Task AddHpDebts_MutatesDebtAndBroadcastsGrasscutterReasonPacket()

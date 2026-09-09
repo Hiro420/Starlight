@@ -5,20 +5,26 @@ using Starlight.Protocol;
 
 namespace Starlight.Game.World;
 
-public sealed class WorldAbilityRouter : IAbilityScopeResolver, IInvokeForwarder
+public sealed class WorldAbilityRouter : IAbilityScopeResolver, IInvokeForwarder, IAbilityDamageRuntime
 {
     public bool TryResolve(IPlayer player, out AbilityScopeContext context)
     {
         var module = player.Module<WorldModule>();
         var world = module.World;
+        var scene = module.Scene;
+        var currentAvatarEntityId = scene is null ? 0 : player.Module<SceneModule>().CurrentAvatarEntityId;
 
         context = new AbilityScopeContext(
             world.Abilities,
             module.PeerId,
             world.HostPeerId,
-            module.Scene?.Id ?? 0);
+            scene?.Id ?? 0,
+            currentAvatarEntityId);
         return true;
     }
+
+    public ValueTask ApplyLoseHpAsync(IPlayer player, AbilityDamageRequest request) =>
+        player.Module<SceneModule>().ApplyAbilityHpLoss(request);
 
     public async Task Forward(IPlayer sender, ForwardType type, IMessage message, uint forwardPeer)
     {
